@@ -156,14 +156,33 @@ $asset  = $latest.assets | Where-Object { $_.name -like 'actions-runner-win-x64-
 if (-not $asset) { throw "Could not find a Windows x64 runner asset in the latest release." }
 
 $zip = Join-Path $InstallRoot $asset.name
+# Validate any existing zip by size. A truncated download from an earlier
+# aborted run will fail extraction with "End of Central Directory record
+# could not be found."
+if (Test-Path $zip) {
+    $localSize = (Get-Item $zip).Length
+    if ($localSize -ne $asset.size) {
+        Write-Warn "Existing '$($asset.name)' is $localSize bytes (expected $($asset.size)); re-downloading..."
+        Remove-Item $zip -Force
+    }
+}
 if (-not (Test-Path $zip)) {
+    $ProgressPreference = 'SilentlyContinue'
     Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip
 }
 
 if (-not (Test-Path (Join-Path $InstallRoot 'config.cmd'))) {
     Write-Step "Extracting runner..."
     Add-Type -AssemblyName System.IO.Compression.FileSystem
-    [System.IO.Compression.ZipFile]::ExtractToDirectory($zip, $InstallRoot)
+    try {
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($zip, $InstallRoot)
+    } catch [System.IO.InvalidDataException] {
+        Write-Warn "Zip appears corrupt; re-downloading and retrying..."
+        Remove-Item $zip -Force
+        $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($zip, $InstallRoot)
+    }
 }
 
 # --- Configure runner (NOT as service: UI automation needs the interactive
