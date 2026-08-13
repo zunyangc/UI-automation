@@ -17,10 +17,14 @@ class CsvLoaderTests(unittest.TestCase):
         cls.spec = csv_loader.load(CSV)
 
     def test_minimal_top_level_keys(self):
-        # The simplified CSV only carries name/description/artifacts in config.
-        for key in ("name", "description", "artifacts", "steps"):
+        # The simplified CSV only carries name/description in config; the
+        # screenshot folder (artifacts.screenshot_dir) is no longer set per
+        # CSV -- it's defaulted by run_test.py's Ctx to
+        # "screenshots/{name}-{timestamp}" unless a CSV opts into a custom
+        # value.
+        for key in ("name", "description", "steps"):
             self.assertIn(key, self.spec)
-        self.assertIn("screenshot_dir", self.spec["artifacts"])
+        self.assertNotIn("artifacts", self.spec)
         # config-heavy blocks are intentionally gone
         for key in ("inputs", "timing", "expected_results"):
             self.assertNotIn(key, self.spec)

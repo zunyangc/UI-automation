@@ -2,7 +2,6 @@
 Section,Key,Value
 name,,testcase1_console_nu1605
 description,,"Launch Visual Studio; create a C# Console App (selecting the last target framework); open the .csproj editor and add a NuGet ItemGroup (NuGet.Commands 4.0.0 + NuGet.Packaging 3.5.0), save and build; add <WarningsAsErrors></WarningsAsErrors>, save and build (NU1605 promoted to an error); then add NoWarn=""NU1605"" to the NuGet.Packaging reference, save and build again. No assertions: the run drives the UI and captures a screenshot at each phase. The template pick, framework 'last item' selection, and all .csproj editor edits are keyboard/clipboard driven against the UIA-opaque VS editor and are flagged LIVE-TUNE where VS version / UI language may shift them."
-artifacts,screenshot_dir,screenshots/{timestamp}
 
 # STEPS
 No,step no,Main step,Trigger,script,args,wait_ms,capture,expect_exit,expected_contains,poll_total_ms,poll_interval_ms,screenshot_pass,screenshot_fail,max_iter,Expected

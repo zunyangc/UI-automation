@@ -21,12 +21,12 @@ This file follows the [agents.md](https://agents.md/) convention and is loaded a
 
 ## Hard rules when authoring or editing a test case
 
-1. A test case is ONE `.csv` with two marker-delimited sections: `# CONFIG` (Section/Key/Value rows: `name`, `description`, `artifacts` → `screenshot_dir`) and `# STEPS` (one row per step). Do not invent new config keys.
+1. A test case is ONE `.csv` with two marker-delimited sections: `# CONFIG` (Section/Key/Value rows: `name`, `description`, optionally `artifacts` → `screenshot_dir` to override the default folder name) and `# STEPS` (one row per step). Do not invent new config keys.
 2. **Do NOT randomize values.** Reproducibility requires identical values every run.
 3. Every real step row needs a `script` and a `Trigger` (becomes the step `description`). Set delays via the `wait_ms` column in **literal milliseconds**. Always populate the `step no` column with a sequential global counter (1, 2, 3… across every step row, including loop bodies) — don't leave it blank.
 4. **Selectors:** prefer `auto_id` + `name` together. `scripts/uia/find_control.py` tries AutomationId first, falls back to name. Always pass `parent=` a captured window hwnd.
 5. **Capture** window/control handles with the `capture` column as JSON (e.g. `{"vars.<name>": "$.cols[1]"}`) on `find_window` / `find_control` steps; reference them as `{vars.<name>}` in later steps.
-6. Artifact paths use `{timestamp}` (substituted at run start, UTC). Default screenshot dir: `screenshots/{timestamp}`. For ordered screenshot names use the `{ss}` placeholder in `screenshot_pass` / `screenshot_fail` filenames (renders `ss_1`, `ss_2`, ...; continuous across the whole run including loops, so it never restarts — optionally add `{n}` for the iteration index, e.g. `{ss}_{n}_name.png`).
+6. Artifact paths use `{timestamp}` (substituted at run start, UTC) and `{name}` (the CONFIG `name` value). Default screenshot dir: `screenshots/{name}-{timestamp}` — don't add an `artifacts,screenshot_dir` row unless a test case genuinely needs a custom location; leaving it out keeps the standard `<name>-<timestamp>` folder naming so screenshots are easy to trace back to their test case. For ordered screenshot names use the `{ss}` placeholder in `screenshot_pass` / `screenshot_fail` filenames (renders `ss_1`, `ss_2`, ...; continuous across the whole run including loops, so it never restarts — optionally add `{n}` for the iteration index, e.g. `{ss}_{n}_name.png`).
 7. For console assertions set the `expected_contains` column (with `poll_total_ms` / `poll_interval_ms` in literal milliseconds).
 8. For file assertions use `assert_file` (supports `--negate`, `--contains`, `--delete`).
 9. Do **not** invent new step types. If something doesn't fit, ask before extending the schema.
@@ -52,7 +52,7 @@ Windows 10/11, PowerShell, Python via `uv` with pins in `requirements.lock.txt` 
 ## Style and scope
 
 - Make surgical changes. Don't touch unrelated code or randomize anything that affects reproducibility.
-- Don't commit secrets or generated `screenshots/{timestamp}/` artifacts.
+- Don't commit secrets or generated `screenshots/{name}-{timestamp}/` artifacts.
 - Don't add new linters, formatters, or test frameworks without being asked.
 
 ## Documentation style (Markdown)

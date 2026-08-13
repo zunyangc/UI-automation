@@ -43,6 +43,12 @@ PY = sys.executable
 QUIET = False
 WHILE_MAX_ITERATIONS = 25  # default safety cap for a `while` loop
 
+# Standard screenshot folder naming: "<test case name>-<timestamp>" so it's
+# obvious which test case a folder of screenshots belongs to. A CSV can still
+# override this by setting `artifacts,screenshot_dir,<custom/path>` in its
+# `# CONFIG` section; when it doesn't, this default is used.
+DEFAULT_SCREENSHOT_DIR = "screenshots/{name}-{timestamp}"
+
 
 class Ctx:
     def __init__(self, spec):
@@ -52,6 +58,7 @@ class Ctx:
         self.ss_counter = 1     # screenshot ordering counter, continuous across the whole run
         ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%SZ")
         self.subs = {
+            "name": spec.get("name") or "test",
             "timestamp": ts,
             "inputs": spec.get("inputs", {}),
             "artifacts": spec.get("artifacts", {}),
@@ -59,10 +66,13 @@ class Ctx:
         }
         # pre-resolve artifacts paths
         art = spec.get("artifacts", {})
-        self.subs["artifacts"] = {
+        resolved_artifacts = {
             k: render(v, self.subs) for k, v in art.items()
         }
-        self.shot_dir = os.path.join(ROOT, self.subs["artifacts"].get("screenshot_dir", "screenshots/run"))
+        if not resolved_artifacts.get("screenshot_dir"):
+            resolved_artifacts["screenshot_dir"] = render(DEFAULT_SCREENSHOT_DIR, self.subs)
+        self.subs["artifacts"] = resolved_artifacts
+        self.shot_dir = os.path.join(ROOT, resolved_artifacts["screenshot_dir"])
         os.makedirs(self.shot_dir, exist_ok=True)
 
 

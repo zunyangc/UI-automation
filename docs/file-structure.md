@@ -21,7 +21,7 @@ A guided tour of every file and folder in this repo, so you can find your way ar
 | `.python-version` | Interpreter version pin used by `uv` to fetch the exact Python build. |
 | `.gitignore` | Excludes `.venv/`, `screenshots/`, and other local artifacts from git. |
 | `.venv/` | Local virtual environment created by `uv sync` (not committed). |
-| `screenshots/` | Per-run screenshot artifacts written under `screenshots/{timestamp}/` (not committed). |
+| `screenshots/` | Per-run screenshot artifacts written under `screenshots/<name>-<timestamp>/` (not committed). |
 | `docs/` | Markdown documentation — see [docs/](#docs). |
 | `scripts/` | Primitive Python helpers invoked by `run_test.py`, grouped into category subfolders — see [scripts/](#scripts) and [scripts-reference.md](scripts-reference.md). |
 | `test_cases/` | Declarative CSV scenarios — see [test_cases/](#test_cases). |

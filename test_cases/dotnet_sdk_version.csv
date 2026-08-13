@@ -2,8 +2,6 @@
 Section,Key,Value,,,,,,,,,,,,,,
 name,,dotnet_sdk_version,,,,,,,,,,,,,,
 description,,"Open a command prompt, validate the active .NET SDK and Microsoft.AspNetCore.App runtime versions via dotnet --info, create a solution + global.json (validating it pins the SDK version), then dynamically loop over every installed Microsoft.AspNetCore.App major version (collected at run time from dotnet --list-runtimes, so 8/9/10/11/... all work) building & self-contained-publishing a console app, opening its .deps.json in Visual Studio, and validating the runtime version band. MyGlobal is left on disk after the run.",,,,,,,,,,,,,,
-artifacts,screenshot_dir,screenshots/{timestamp},,,,,,,,,,,,,,
-,,,,,,,,,,,,,,,,
 # STEPS,,,,,,,,,,,,,,,,
 No,step no,Main step,Trigger,script,args,wait_ms,capture,expect_exit,expected_contains,poll_total_ms,poll_interval_ms,screenshot_pass,screenshot_fail,max_iter,Expected,
 0,1,Pre-clean,Resolve the current user's home directory (works on any drive).,scripts/files/print_home.py,,,"{""vars.home"": ""$.cols[0]""}",,,,,,,,Home directory resolved.,
