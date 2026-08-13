@@ -51,6 +51,7 @@ on:
         options:
           # --- Add your DevBox here after running scripts/setup-remote-runner.ps1 ---
           - 13082026-devbox-1 # zunyangc
+          - 13082026-devbox-2 # zunyangc
   # To enable nightly runs, uncomment:
   # schedule:
   #   - cron: '0 18 * * *'   # 02:00 UTC+8 (Malaysia)
