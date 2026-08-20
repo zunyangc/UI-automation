@@ -22,17 +22,33 @@ def main():
     # Prefer the Document control (PowerShell console exposes its buffer there)
     for c in texts:
         try:
-            if c.element_info.control_type == "Document":
-                v = c.iface_value.CurrentValue if hasattr(c, "iface_value") else None
+            if c.element_info.control_type != "Document":
+                continue
+            try:
+                v = c.iface_value.CurrentValue
                 if v:
                     print(v)
                     return
-                # fallback: legacy patterns
-                try:
-                    print(c.legacy_properties().get("Value", ""))
+            except Exception:
+                pass
+            # fallback: legacy patterns
+            try:
+                v = c.legacy_properties().get("Value", "")
+                if v:
+                    print(v)
                     return
-                except Exception:
-                    pass
+            except Exception:
+                pass
+            # fallback: UIA TextPattern (some conhost/cmd.exe consoles expose
+            # their buffer only via TextPattern, not Value/LegacyIAccessible)
+            try:
+                doc_range = c.iface_text.DocumentRange
+                v = doc_range.GetText(-1)
+                if v and v.strip():
+                    print(v)
+                    return
+            except Exception:
+                pass
         except Exception:
             continue
     # Last resort: dump every visible text
