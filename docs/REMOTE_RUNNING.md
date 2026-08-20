@@ -283,3 +283,49 @@ endpoint 404s), use `-LocalOnly` to skip the GitHub-side deregistration:
 ```powershell
 .\scripts\remove-runner.ps1 -Label <YourLabel> -LocalOnly
 ```
+
+---
+
+## Actions storage hygiene
+
+The free GitHub plan includes only **0.5 GB of Actions storage per
+month** (artifacts + logs, account-wide across all your repos). Because
+every workflow run here can upload a `screenshots-<label>-<runid>`
+artifact, a busy fork can hit the cap in a couple of weeks and GitHub
+will email you a "100% of Actions storage" warning.
+
+### One-time setup (recommended)
+
+1. **Set a $0 Actions spending limit** so you can never be billed by
+   accident: <https://github.com/settings/billing/spending_limit> →
+   Actions → set to `$0`. Runs beyond the free tier will just be
+   blocked until the next cycle instead of billed.
+2. **Shorten artifact retention on your fork**:
+   `https://github.com/<your-handle>/UI-automation/settings/actions` →
+   *Artifact and log retention* → change from 90 days to something like
+   **7 days**. New artifacts inherit this; existing ones keep their
+   original expiry.
+
+### If you get the "100% storage used" email
+
+List and delete existing artifacts across your account:
+
+```bash
+# List repos with active artifacts and their size in MB
+gh repo list <your-handle> --limit 100 --json nameWithOwner -q '.[].nameWithOwner' | \
+  while read r; do
+    size=$(gh api "repos/$r/actions/artifacts" --paginate \
+      -q '.artifacts[] | select(.expired==false) | .size_in_bytes' \
+      | awk '{s+=$1} END {printf "%.1f", s/1024/1024}')
+    count=$(gh api "repos/$r/actions/artifacts" -q '.total_count')
+    [ "${count:-0}" != "0" ] && echo "$r  artifacts=$count  activeMB=$size"
+  done
+
+# Delete every artifact on a repo (irreversible, but fine -- they expire anyway)
+gh api repos/<your-handle>/<repo>/actions/artifacts --paginate \
+  -q '.artifacts[].id' | \
+  xargs -I{} gh api -X DELETE repos/<your-handle>/<repo>/actions/artifacts/{}
+```
+
+Billing counters update on a delay (usually within an hour). Once you
+drop back under 0.5 GB the alert clears automatically.
