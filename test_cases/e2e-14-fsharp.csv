@@ -2,7 +2,6 @@
 Section,Key,Value
 name,,e2e-14
 description,,"F# console app + two F# class libraries (net latest and .NET Standard 2.0) with project references, build/run validation, an xUnit test project referencing ClassLibrary2, Test Explorer run, and Live Unit Testing."
-artifacts,screenshot_dir,screenshots/{name}-{timestamp}
 
 # STEPS
 No,step no,Main step,Trigger,script,args,wait_ms,capture,expect_exit,expected_contains,poll_total_ms,poll_interval_ms,screenshot_pass,screenshot_fail,max_iter,Expected
