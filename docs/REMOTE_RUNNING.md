@@ -35,10 +35,11 @@ your laptop browser. No RDP needed during the run itself.
 - Improvements to shared code (workflow, docs, scripts, new test cases) are
   contributed back to upstream via pull request.
 
-**How it stays scalable:** each DevBox registers as a distinct runner with
-a unique label (e.g. `12082026-desk-1`). The workflow's `target_devbox` input
-picks which label to run on. Adding a DevBox = one command on that DevBox;
-the setup script also adds the label to your fork's workflow dropdown.
+**How it stays scalable:** each fork exposes 4 static DevBox slots
+(`devbox-1` .. `devbox-4`). Registering a DevBox claims one free slot on
+your fork; deregistering frees it. The workflow's `target_devbox` input
+picks which slot to run on. Adding a DevBox = one command on that DevBox;
+the workflow YAML is never edited.
 
 ---
 
@@ -84,30 +85,13 @@ irm https://raw.githubusercontent.com/<your-handle>/UI-automation/main/ops/setup
 
 The script will:
 
-1. Detect (or ask for) your GitHub handle and clone
-   `https://github.com/<your-handle>/UI-automation.git` into `$HOME\UI-automation`.
+1. Detect (or ask for) your GitHub handle and clone `https://github.com/<your-handle>/UI-automation.git` into `$HOME\UI-automation`.
 2. Install `uv` and run `uv sync` (Python + deps).
-3. Compose your DevBox label as `<DDMMYYYY>[-<suffix>]-<N>`:
-   - today's date is auto-prepended,
-   - it asks for an optional suffix (e.g. `desk`, `laptop`) — leave blank to skip,
-   - `<N>` auto-increments by scanning existing labels on your fork's workflow.
-4. Prompt you for a **runner registration token**. Get it from
-   (open in your **laptop** browser):
+3. Ask you for a **GitHub Personal Access Token** with `repo` scope (create one at <https://github.com/settings/tokens>). The PAT is used *only* during setup to (a) list your fork's currently-registered runners so we know which slots are free, and (b) fetch a runner registration token — no browser copy-paste needed.
+4. Show you the free slots on your fork out of `devbox-1..devbox-4` and let you pick one. If all 4 are claimed, the script fails with a pointer to `ops\remove-runner.ps1`.
+5. Register the runner under the chosen `devbox-N` label and install a Scheduled Task so it auto-starts on logon. **The workflow YAML is not edited** — the 4 slots are static.
 
-   ```
-   https://github.com/<your-handle>/UI-automation/settings/actions/runners/new?arch=x64&os=win
-   ```
-
-   Copy the token that appears next to `./config.cmd --token ...` and
-   paste it into the PowerShell prompt. Tokens expire in ~1 hour — grab
-   it right before pasting.
-5. Register the runner, install a Scheduled Task so it auto-starts on
-   logon, add your label to `.github/workflows/run-ui-tests.yml`, and
-   push the change to your fork's `main` (no PR — it's your own fork).
-
-When it finishes, verify at
-`https://github.com/<your-handle>/UI-automation/settings/actions/runners`
-that your runner shows status **Idle**.
+When it finishes, verify at `https://github.com/<your-handle>/UI-automation/settings/actions/runners` that your runner shows status **Idle**.
 
 ### Step 3 — 🖥️ DEVBOX: Log in and leave unlocked
 
@@ -144,7 +128,7 @@ Click **Run workflow** (top-right).
 | Input | Meaning | Example |
 |---|---|---|
 | `csv_spec` | Pick one CSV, or `ALL` to run every case sequentially | `test_cases/prod-1-cs_console_app.csv` |
-| `target_devbox` | Which DevBox label to run on | `12082026-1` |
+| `target_devbox` | Which DevBox slot to run on | `devbox-1` |
 
 Click **Run workflow**.
 
@@ -170,7 +154,7 @@ If your runner shows **Offline** (grey dot), restart it — pick either:
 **A) One-liner via the Scheduled Task** (the one `ops\setup-remote-runner.ps1`
 registered):
 
-Replace `<Label>` with your DevBox label (e.g. `12082026-1`).
+Replace `<Label>` with your DevBox slot (e.g. `devbox-1`).
 **B) Manual restart** in the same admin PowerShell:
 
 ```powershell
@@ -230,12 +214,13 @@ Each workflow run performs these steps on the DevBox:
 
 ## Adding another DevBox for yourself
 
-Same one-liner as Part B — `ops\setup-remote-runner.ps1` auto-composes a fresh
-label. `<N>` auto-increments by scanning the existing labels on your
-fork's workflow, so a second DevBox provisioned on the same day + same
-suffix becomes `<DDMMYYYY>[-<suffix>]-2`. Each label is unique per DevBox;
-**never** reuse a label across two machines — GitHub will re-register and
-the previous DevBox will silently stop receiving jobs.
+Same one-liner as Part B — `ops\setup-remote-runner.ps1` will show you the
+remaining free slots on your fork (out of `devbox-1..devbox-4`) and let
+you pick one. The hard cap is 4 registered DevBoxes per fork at any time.
+**Never** register two DevBoxes under the same slot — GitHub will
+re-register and the previous DevBox will silently stop receiving jobs.
+If you hit the cap and no longer need one of the DevBoxes, run
+`ops\remove-runner.ps1` on it to free the slot.
 
 ---
 
@@ -279,9 +264,9 @@ This will:
 
 1. Stop and unregister the `GHRunner-<Label>` Scheduled Task.
 2. Kill the live listener process.
-3. Run `config.cmd remove --token <Token>` to deregister on GitHub.
-4. Strip the label from `target_devbox.options` in your fork's workflow
-   and push the change to `origin/main`.
+3. Run `config.cmd remove --token <Token>` to deregister on GitHub, which frees the slot so `ops\setup-remote-runner.ps1` can re-claim it on another (or the same) DevBox.
+
+The workflow YAML is **not** edited — the 4 slots are static.
 
 If the runner is already gone from Settings -> Runners (or the token
 endpoint 404s), use `-LocalOnly` to skip the GitHub-side deregistration:

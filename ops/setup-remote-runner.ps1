@@ -1,12 +1,21 @@
 # One-line DevBox setup for the UI-automation self-hosted runner (fork-based model).
 # Run this ONCE per DevBox in an Administrator PowerShell:
 #   irm https://raw.githubusercontent.com/<your-handle>/UI-automation/main/ops/setup-remote-runner.ps1 | iex
+#
+# Slot model:
+#   The workflow YAML exposes 4 static DevBox slots: devbox-1 .. devbox-4.
+#   This script asks GitHub which slots on your fork are currently free and
+#   lets you claim one. No workflow edits, no git push -- the YAML never
+#   changes. To free a slot, run ops/remove-runner.ps1 on the DevBox that
+#   currently holds it.
 
 $ErrorActionPreference = 'Stop'
 
 function Write-Step($msg) { Write-Host ""; Write-Host "==> $msg" -ForegroundColor Cyan }
 function Write-Ok($msg)   { Write-Host "    $msg" -ForegroundColor Green }
 function Write-Warn($msg) { Write-Host "    $msg" -ForegroundColor Yellow }
+
+$MaxSlots = 4
 
 # --- Admin check ---------------------------------------------------------
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -16,6 +25,11 @@ if (-not $isAdmin) {
 
 Set-Location $HOME
 $RepoPath = Join-Path $HOME 'UI-automation'
+
+# --- Refuse if a runner is already installed on this DevBox --------------
+if (Test-Path 'C:\actions-runner\config.cmd') {
+    throw "A self-hosted runner is already installed at C:\actions-runner. Deregister it first with 'ops\remove-runner.ps1 -Label <current-label>' before registering a new slot."
+}
 
 # --- Detect GitHub handle ------------------------------------------------
 Write-Step "Resolving your GitHub handle..."
@@ -115,35 +129,62 @@ Write-Step "Installing Python dependencies (venv: $projectEnvironment)..."
 & $projectSetup -EnvironmentPath $projectEnvironment
 Write-Ok "Python environment ready."
 
-# --- Compose the DevBox label -------------------------------------------
-Write-Step "Composing your DevBox label..."
-$today = (Get-Date -Format 'ddMMyyyy')
-$suffix = Read-Host "Optional label suffix (leave blank for none, e.g. 'desk' or 'laptop')"
+# --- Prompt for PAT (used for slot check + registration token) ----------
+Write-Step "GitHub Personal Access Token"
+Write-Host "    A PAT with 'repo' scope is required so we can:" -ForegroundColor Yellow
+Write-Host "      * list the runners currently registered on your fork" -ForegroundColor Yellow
+Write-Host "      * fetch a runner registration token (no browser copy-paste)" -ForegroundColor Yellow
+Write-Host "    Create one at: https://github.com/settings/tokens (classic, 'repo' scope)" -ForegroundColor Cyan
+$PatSecure = Read-Host "PAT" -AsSecureString
+$Pat = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+    [Runtime.InteropServices.Marshal]::SecureStringToBSTR($PatSecure))
+if (-not $Pat) { throw "No PAT provided." }
 
-# Auto-increment N by scanning the workflow file for existing labels
-# with the same date+suffix stem on this fork.
-$workflow = Join-Path $RepoPath '.github/workflows/run-ui-tests.yml'
-$stem = if ($suffix) { "$today-$suffix" } else { $today }
-$n = 1
-if (Test-Path $workflow) {
-    $wfContent = Get-Content -Path $workflow -Raw
-    $existing = [regex]::Matches($wfContent, "(?m)^\s*-\s+$([regex]::Escape($stem))-(\d+)\b")
-    if ($existing.Count -gt 0) {
-        $maxN = ($existing | ForEach-Object { [int]$_.Groups[1].Value } | Measure-Object -Maximum).Maximum
-        $n = $maxN + 1
-    }
+$Headers = @{
+    Authorization = "Bearer $Pat"
+    Accept        = 'application/vnd.github+json'
+    'X-GitHub-Api-Version' = '2022-11-28'
+    'User-Agent'  = 'ui-automation-setup'
 }
-$Label = "$stem-$n"
+
+# --- Discover free DevBox slots on this fork ----------------------------
+Write-Step "Checking which devbox-N slots are free on $Repo..."
+try {
+    $runners = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/actions/runners?per_page=100" -Headers $Headers -Method Get
+} catch {
+    throw "Could not list runners on $Repo. Check that the PAT has 'repo' scope and that your fork exists. Error: $_"
+}
+
+$existing = @()
+if ($runners.runners) { $existing = @($runners.runners | ForEach-Object { $_.name }) }
+Write-Ok "Registered runners on fork: $(if ($existing) { $existing -join ', ' } else { '(none)' })"
+
+$free = 1..$MaxSlots | Where-Object { "devbox-$_" -notin $existing }
+if (-not $free) {
+    throw "All $MaxSlots DevBox slots (devbox-1..devbox-$MaxSlots) are already registered on $Repo. Free one with 'ops\remove-runner.ps1 -Label <label>' on the DevBox that owns it, then re-run this script."
+}
+
+Write-Host "    Available slots: $($free -join ', ')" -ForegroundColor Yellow
+do {
+    $picked = Read-Host "Pick a slot number ($($free -join '/'))"
+    $pickedInt = 0
+    $ok = [int]::TryParse($picked, [ref]$pickedInt) -and ($pickedInt -in $free)
+    if (-not $ok) { Write-Warn "Invalid choice '$picked'. Must be one of: $($free -join ', ')" }
+} while (-not $ok)
+
+$Label = "devbox-$pickedInt"
 Write-Ok "Label: $Label"
 
-# --- Prompt for token ----------------------------------------------------
-Write-Step "Runner registration token"
-Write-Host "    Open this URL in your BROWSER (on your laptop):" -ForegroundColor Yellow
-Write-Host "      https://github.com/$Repo/settings/actions/runners/new?arch=x64&os=win" -ForegroundColor Cyan
-Write-Host "    Copy the token shown next to './config.cmd --token ...' and paste it below." -ForegroundColor Yellow
-Write-Host "    (Tokens expire in ~1 hour; grab it right before pasting.)" -ForegroundColor Yellow
-$Token = Read-Host "Token"
-if (-not $Token) { throw "No token provided." }
+# --- Fetch a runner registration token via API --------------------------
+Write-Step "Requesting a runner registration token from GitHub..."
+try {
+    $tokenResp = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/actions/runners/registration-token" -Headers $Headers -Method Post
+} catch {
+    throw "Could not fetch a registration token. Check that the PAT has 'repo' scope. Error: $_"
+}
+$Token = $tokenResp.token
+if (-not $Token) { throw "GitHub did not return a registration token." }
+Write-Ok "Registration token acquired (expires $($tokenResp.expires_at))."
 
 # --- Delegate to setup-runner.ps1 ---------------------------------------
 Write-Step "Invoking ops\setup-runner.ps1..."
