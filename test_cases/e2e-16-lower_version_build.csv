@@ -2,7 +2,6 @@
 Section,Key,Value
 name,,e2e-16-lower_version_build
 description,,"Copies ConsoleApp1-80 and ConsoleApp1-90 zip builds from the \\bvtsrv2\team\e2eshare network share onto the Desktop, extracts each, then builds and runs each solution in Visual Studio, capturing a screenshot of each run."
-artifacts,screenshot_dir,screenshots/{name}-{timestamp}
 
 # STEPS
 No,step no,Main step,Trigger,script,args,wait_ms,capture,expect_exit,expected_contains,poll_total_ms,poll_interval_ms,screenshot_pass,screenshot_fail,max_iter,Expected
