@@ -7,25 +7,28 @@ name: Run UI Tests
 #   2. Open YOUR FORK's Actions tab -> "Run UI Tests" -> "Run workflow"
 #   3. Pick a CSV spec + your DevBox label -> Run.
 #
-# The `target_devbox` dropdown lists all known team labels for convenience,
-# but only labels registered on YOUR fork will actually accept the job --
-# picking someone else's label from your fork will queue forever.
+# The `target_devbox` dropdown is a static list of 4 slots per fork
+# (devbox-1..devbox-4). Only slots your fork has actually registered
+# will accept jobs -- picking an unregistered slot will queue forever.
 #
 # Multiple specs: pick "ALL" from the csv_spec dropdown to run every CSV
 # in test_cases/ sequentially on the chosen DevBox.
 #
-# DevBox label naming convention (used in the `target_devbox` choices below):
-#   <DDMMYYYY>[-<name>]-<N>          e.g. 12082026-1, 12082026-desk-2
-#   <INITIALS>-<DDMMYYYY>-<N>        (legacy) e.g. ZY-24072026-1
-#     DDMMYYYY = date DevBox was provisioned
-#     <name>   = optional label suffix (desk, laptop, etc.)
-#     N        = incrementing number if the same tester owns multiple DevBoxes
+# DevBox slot model:
+#   The `target_devbox` dropdown below is STATIC: exactly 4 slots per fork,
+#   named devbox-1 .. devbox-4. When a tester runs ops/setup-remote-runner.ps1
+#   on a DevBox, the script asks GitHub which slots on their fork are
+#   currently free and lets them claim one -- so at most 4 DevBoxes can be
+#   registered per fork at any time. Deregistering (ops/remove-runner.ps1)
+#   frees the slot; the YAML is NEVER edited by either script.
 #
-# TO REGISTER A NEW DEVBOX: run ops/setup-remote-runner.ps1 on the
-# DevBox -- it clones your fork, installs deps, registers the runner, and
-# adds the label to `target_devbox.options` on your fork automatically.
-# Merging to upstream is optional but nice so other testers see the label
-# in the seeded list when they fork.
+# DevBox label naming convention (used in the `target_devbox` choices below):
+#   devbox-<N>   where N in 1..4
+#
+# TO REGISTER A NEW DEVBOX: run ops/setup-remote-runner.ps1 on the DevBox
+# -- it clones your fork, installs deps, asks GitHub which of devbox-1..4
+# are free on your fork, and registers this DevBox under a slot you pick.
+# The workflow YAML is NOT edited; the dropdown is already static below.
 
 on:
   workflow_dispatch:
@@ -51,7 +54,11 @@ on:
         required: true
         type: choice
         options:
-          # --- Add your DevBox here after running ops/setup-remote-runner.ps1 ---
+          # --- Static slots. Do NOT edit. Register/deregister via ops/setup-remote-runner.ps1 and ops/remove-runner.ps1. ---
+          - devbox-1
+          - devbox-2
+          - devbox-3
+          - devbox-4
   # To enable nightly runs, uncomment:
   # schedule:
   #   - cron: '0 18 * * *'   # 02:00 UTC+8 (Malaysia)

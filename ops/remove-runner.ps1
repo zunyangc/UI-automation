@@ -1,24 +1,26 @@
 ﻿<#
 .SYNOPSIS
-    Uninstall a self-hosted DevBox runner and strip its label from the
-    fork's workflow file.
+    Uninstall a self-hosted DevBox runner and free its slot on the fork.
 
 .DESCRIPTION
     Run this on the DevBox in an Administrator PowerShell to fully
     decommission a runner:
 
-        .\ops\remove-runner.ps1 -Label <YourLabel> -Token <RemoveToken>
+        .\ops\remove-runner.ps1 -Label <devbox-N> -Token <RemoveToken>
 
     What it does:
       1. Stop and unregister the Scheduled Task 'GHRunner-<Label>'.
       2. Kill any live 'run.cmd'/'Runner.Listener' process for that runner.
       3. Run 'C:\actions-runner\config.cmd remove --token <Token>' to
-         deregister the runner on GitHub.
-      4. Edit .github/workflows/run-ui-tests.yml on your fork to strip
-         '- <Label>' from target_devbox.options and push to origin/main.
+         deregister the runner on GitHub, which frees the slot so
+         setup-remote-runner.ps1 can re-claim it on another (or the same)
+         DevBox.
+
+    The workflow YAML is static (devbox-1..devbox-4 slots) and is NOT
+    edited by this script.
 
 .PARAMETER Label
-    The runner label (e.g. '12082026-devbox-1').
+    The DevBox slot label (devbox-1, devbox-2, devbox-3, or devbox-4).
 
 .PARAMETER Token
     Runner *removal* token. Get one from:
@@ -32,7 +34,8 @@
     if omitted.
 
 .PARAMETER RepoPath
-    Local clone path (default: $HOME\UI-automation).
+    Local clone path (default: $HOME\UI-automation). Used only for repo
+    auto-detection when -Repo is omitted.
 
 .PARAMETER RunnerRoot
     Runner install dir (default: C:\actions-runner).
@@ -45,7 +48,7 @@
 
 param(
     [Parameter(Mandatory=$true)]
-    [ValidatePattern('^([A-Z]{2}-)?\d{8}(-[A-Za-z0-9]+)*-\d+$')]
+    [ValidatePattern('^devbox-[1-4]$')]
     [string]$Label,
 
     [string]$Token,
@@ -127,43 +130,13 @@ if (-not (Test-Path (Join-Path $RunnerRoot 'config.cmd'))) {
     } finally { Pop-Location }
 }
 
-# --- Strip label from workflow file ------------------------------------
-Write-Step "Removing '$Label' from workflow file on '$RepoPath'..."
-if (-not (Test-Path (Join-Path $RepoPath '.git'))) {
-    Write-Warn "No local clone at $RepoPath; skipping workflow edit."
-} else {
-    $workflow = Join-Path $RepoPath '.github/workflows/run-ui-tests.yml'
-    if (-not (Test-Path $workflow)) {
-        Write-Warn "Workflow file not found at $workflow; skipping."
-    } else {
-        Push-Location $RepoPath
-        try {
-            git fetch origin main | Out-Host
-            git checkout main | Out-Host
-            git reset --hard origin/main | Out-Host
-
-            $content = Get-Content -Path $workflow -Raw
-            # Match one full line whose bullet value equals the label, with optional trailing comment.
-            $linePattern = "(?m)^[ ]{10}-[ ]+$([regex]::Escape($Label))([ \t]+#[^\r\n]*)?\r?\n"
-            if ($content -notmatch $linePattern) {
-                Write-Warn "Label '$Label' not found in $workflow; nothing to strip."
-            } else {
-                $updated = [regex]::Replace($content, $linePattern, '')
-                Set-Content -Path $workflow -Value $updated -NoNewline
-                Write-Ok "Label line removed from workflow."
-
-                Write-Step "Committing and pushing to origin/main..."
-                git add .github/workflows/run-ui-tests.yml
-                git commit -m "Decommission DevBox runner: $Label" | Out-Host
-                git push origin main | Out-Host
-                Write-Ok "Workflow updated on origin/main."
-            }
-        } catch {
-            Write-Warn "Workflow edit/push failed: $_"
-        } finally { Pop-Location }
-    }
-}
+# --- Done: workflow YAML intentionally not touched ---------------------
+# NOTE: the workflow YAML is static (devbox-1..devbox-4) and is not
+# edited by this script. Freeing the slot on GitHub (via config.cmd
+# remove above) is sufficient -- the next setup-remote-runner.ps1 run
+# will see the slot as available.
 
 Write-Host ""
 Write-Host "DONE." -ForegroundColor Green
-Write-Host "Verify: https://github.com/$Repo/settings/actions/runners (label should be gone)."
+Write-Host "Verify: https://github.com/$Repo/settings/actions/runners (runner '$Label' should be gone)."
+Write-Host "The '$Label' slot is now free for another DevBox to claim via ops\setup-remote-runner.ps1."

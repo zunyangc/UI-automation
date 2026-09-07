@@ -78,16 +78,16 @@ irm https://raw.githubusercontent.com/<your-handle>/UI-automation/main/ops/setup
 ```
 
 The bootstrap clones your fork, installs `uv` + deps, prompts once for a
-runner-registration token, auto-composes a `<DDMMYYYY>[-<suffix>]-<N>`
-label, registers the runner, and pushes the workflow update to your
-fork's `main`. See [`docs/REMOTE_RUNNING.md`](docs/REMOTE_RUNNING.md) for
-the full walkthrough.
+GitHub PAT (`repo` scope), shows you which of the 4 static DevBox slots
+(`devbox-1`..`devbox-4`) are free on your fork, lets you claim one, and
+registers the runner under that slot. The workflow YAML is never edited.
+See [`docs/REMOTE_RUNNING.md`](docs/REMOTE_RUNNING.md) for the full walkthrough.
 
 **Day-to-day (browser only):** Open your fork's Actions tab
 (`https://github.com/<your-handle>/UI-automation/actions/workflows/run-ui-tests.yml`) →
-**Run workflow** → pick a CSV + your DevBox label.
+**Run workflow** → pick a CSV + your DevBox slot (`devbox-N`).
 
-Full guide, including the label convention, per-run cleanup behaviour, and
+Full guide, including the slot model, per-run cleanup behaviour, and
 troubleshooting: [`docs/REMOTE_RUNNING.md`](docs/REMOTE_RUNNING.md).
 
 ## Using with Copilot CLI

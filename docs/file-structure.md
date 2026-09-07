@@ -34,7 +34,7 @@ A guided tour of every file and folder in this repo, so you can find your way ar
 | `ops/setup.ps1` | Shared Python interpreter, virtual environment, and dependency installer. |
 | `ops/setup-remote-runner.ps1` | One-line DevBox bootstrap that clones a fork and coordinates runner registration. |
 | `ops/setup-runner.ps1` | Registers and starts a self-hosted GitHub Actions runner. |
-| `ops/remove-runner.ps1` | Decommissions a runner and removes its workflow label. |
+| `ops/remove-runner.ps1` | Decommissions a runner on GitHub and frees its `devbox-N` slot on the fork. |
 | `ops/finalize-run.ps1` | Cleans known UI-test processes and artifacts between remote runs. |
 | `ops/ui-auto-wheelhouse.zip` | SHA-256-verified archive of pinned Windows wheels for offline setup. |
 
