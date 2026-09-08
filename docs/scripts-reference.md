@@ -159,6 +159,15 @@ click_in_dialog.py <title_regex> --button NAME [--auto-id A] [--match exact|cont
                    [--find-backend uia|win32] [--timeout 4.0] [--required]
 ```
 
+### `close_pane_if_present.py` — close a nested tool-window pane by title, if present
+Searches the *descendants* of an already-known parent window (e.g. a Visual Studio main window's hwnd) for a nested pane/tool-window control matching `name_regex` (VS tool windows are not separate top-level windows, so `click_in_dialog.py`/`find_window.py`'s `Desktop().windows()` search can't see them). If found, clicks a button inside that pane matching `--button` (default `Close`, matched `--match exact` by default since VS panes expose several similarly-named buttons -- e.g. a "hide" action labeled `Close (Shift+Esc)` -- and only the plain `Close` title-bar button actually dismisses the floating window). Tolerant by default: no matching pane/button within `--timeout-ms` is a no-op (exit 0) unless `--required` (exit 1). Use this once, generically, right after a Visual Studio window is found/activated to dismiss tool windows VS sometimes auto-opens on solution load (e.g. "Live Unit Testing", confirmed live to auto-appear and dock over the editor for some solutions) instead of working around it per test case. Exit 2 on error.
+
+```
+close_pane_if_present.py <hwnd> <name_regex> [--control-type Window|Pane|Custom (repeatable)]
+                         [--button Close] [--match exact|contains|regex]
+                         [--timeout-ms 3000] [--poll-ms 300] [--required]
+```
+
 ### `find_devenv.py` — locate the Visual Studio `devenv.exe`
 Finds the installed VS executable, edition/version/channel agnostic: tries `vswhere` (`-latest`, then `-prerelease`), the `VS7` registry keys, and a Program Files scan. `--path` (or `$VSDEVENV`) forces a path; `--prerelease` prefers Insiders/Preview. Prints the full `devenv.exe` path as the **first** line (`$.cols[0]`). Exit 2 if no VS install is found.
 
