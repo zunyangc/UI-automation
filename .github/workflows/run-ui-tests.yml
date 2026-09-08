@@ -41,7 +41,7 @@ on:
         options:
           # --- Update here: keep in sync with test_cases/*.csv ---
           # - ALL  # to be supported in the future
-          - test_cases/e2e-3-template-test.csv
+          - test_cases/e2e-3-template_test.csv
           - test_cases/prod-1-cs_console_app.csv
           - test_cases/prod-2-hot_reload.csv
           - test_cases/prod-3-dotnet_core_cs.csv
