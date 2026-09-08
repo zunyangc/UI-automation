@@ -122,6 +122,12 @@ class AssertFileExistsTests(unittest.TestCase):
 
             self.assertEqual(cp.returncode, 0, cp.stderr)
             self.assertFalse(os.path.exists(folder))
+            # The junction is a reparse point, not the real data: deleting the
+            # parent tree that contains it must remove only the link, never
+            # recurse through it into the real target. Assert the target
+            # directory and its file are still intact after the delete.
+            self.assertTrue(os.path.isdir(target_dir))
+            self.assertTrue(os.path.exists(os.path.join(target_dir, "000.testlog")))
 
 
 if __name__ == "__main__":

@@ -57,6 +57,42 @@ class ClosesWithinGraceTests(unittest.TestCase):
         self.assertIn(f"closed hwnd={hwnd}", out.getvalue())
 
 
+class FindMatchesEnumerationRaceTests(unittest.TestCase):
+    # pywinauto's Desktop(...).windows() can raise if a transient window
+    # (e.g. an Explorer window this cleanup sweep is meant to close) closes
+    # mid-enumeration. find_matches() is used by this best-effort cleanup
+    # catch-all, so it must skip that backend's enumeration instead of
+    # letting the exception propagate and abort the whole script -- mirrors
+    # click_in_dialog.find_dialog()'s handling of the same race.
+    def test_skips_backend_when_windows_enumeration_raises(self):
+        import re
+
+        good_window = mock.Mock()
+        good_window.handle = 123
+        good_window.window_text.return_value = "Desktop - File Explorer"
+
+        bad_desktop = mock.Mock()
+        bad_desktop.windows.side_effect = RuntimeError("Handle 999 is not a vaild window handle")
+        good_desktop = mock.Mock()
+        good_desktop.windows.return_value = [good_window]
+
+        with mock.patch.object(cwm, "Desktop", side_effect=[bad_desktop, good_desktop]):
+            matches = cwm.find_matches(re.compile("File Explorer"), ["uia", "win32"])
+
+        self.assertEqual(matches, [(123, "Desktop - File Explorer")])
+
+    def test_returns_empty_when_every_backend_enumeration_raises(self):
+        import re
+
+        raising_desktop = mock.Mock()
+        raising_desktop.windows.side_effect = RuntimeError("Handle X is not a vaild window handle")
+
+        with mock.patch.object(cwm, "Desktop", return_value=raising_desktop):
+            matches = cwm.find_matches(re.compile("File Explorer"), ["uia", "win32"])
+
+        self.assertEqual(matches, [])
+
+
 class StillAliveTests(unittest.TestCase):
     def test_still_alive_without_force_exits_2(self):
         hwnd = 777

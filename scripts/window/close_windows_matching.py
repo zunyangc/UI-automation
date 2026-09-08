@@ -70,7 +70,16 @@ def find_matches(rx, backends):
     matches = []
     seen = set()
     for backend in backends:
-        for w in Desktop(backend=backend).windows():
+        try:
+            windows = Desktop(backend=backend).windows()
+        except Exception:
+            # A window can close mid-enumeration (e.g. a transient dialog or
+            # Explorer window from a prior step), which raises rather than
+            # just skipping that window. This script is a best-effort cleanup
+            # catch-all, so it must never itself abort the run -- skip this
+            # backend's enumeration instead of propagating the exception.
+            windows = []
+        for w in windows:
             try:
                 if w.handle in seen:
                     continue
