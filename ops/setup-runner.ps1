@@ -11,10 +11,9 @@
     Normally invoked by ops/setup-remote-runner.ps1 (see docs/REMOTE_RUNNING.md).
 
 .PARAMETER Label
-    The label to register this runner under. Accepted formats:
-      <DDMMYYYY>-<N>                    e.g. 12082026-1
-      <DDMMYYYY>-<Name>-<N>             e.g. 12082026-desk-1
-      <INITIALS>-<DDMMYYYY>-<N>         (legacy) e.g. ZY-24072026-1
+    The DevBox slot to register this runner under. Must be one of the
+    static slots exposed by .github/workflows/run-ui-tests.yml:
+      devbox-1, devbox-2, devbox-3, devbox-4
 
 .PARAMETER Repo
     The GitHub repo to register the runner against (must be YOUR fork).
@@ -32,10 +31,10 @@
     $HOME\UI-automation
 
 .EXAMPLE
-    .\ops\setup-runner.ps1 -Label 12082026-1
+    .\ops\setup-runner.ps1 -Label devbox-1
 
 .EXAMPLE
-    .\ops\setup-runner.ps1 -Label 12082026-desk-1 -Token ABCDEF...
+    .\ops\setup-runner.ps1 -Label devbox-2 -Token ABCDEF...
 
 .NOTES
     Must be run in an Administrator PowerShell (installing a Scheduled
@@ -45,7 +44,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidatePattern('^([A-Z]{2}-)?\d{8}(-[A-Za-z0-9]+)*-\d+$')]
+    [ValidatePattern('^devbox-[1-4]$')]
     [string]$Label,
 
     [string]$Repo,
@@ -96,10 +95,6 @@ if (-not $Repo) {
         throw "Origin still points at the upstream repo. Fork william051200/UI-automation to your account, re-clone from your fork, and re-run ops\setup-remote-runner.ps1."
     }
 }
-
-# Extract GitHub handle from the resolved repo (owner part) -- used as the
-# commenting/attribution name next to the label in the workflow file.
-$GhHandle = ($Repo -split '/')[0]
 
 # --- Prereqs: uv, git, python --------------------------------------------
 Write-Step "Checking prerequisites (uv, git, python)..."
@@ -232,82 +227,14 @@ try {
     Write-Warn "after each reboot/logon."
 }
 
-# --- Update workflow YAML to expose this label in the dropdown ------------
-Write-Step "Adding '$Label' to .github/workflows/run-ui-tests.yml..."
-
-$workflow = Join-Path $RepoPath '.github/workflows/run-ui-tests.yml'
-if (-not (Test-Path $workflow)) {
-    Write-Warn "Workflow file not found at $workflow; skipping YAML edit."
-    Write-Warn "Add '- $Label   # $GhHandle' manually under target_devbox.options."
-} else {
-    $content = Get-Content -Path $workflow -Raw -Encoding UTF8
-    $newLine = "          - $Label # $GhHandle"
-
-    if ($content -match [regex]::Escape("- $Label")) {
-        Write-Ok "Label '$Label' is already present in the workflow -- nothing to do."
-        $skipPush = $true
-    } else {
-        $skipPush = $false
-        # Primary: find target_devbox.options block and append after the last existing bullet line.
-        # Accept both legacy 'XX-DDMMYYYY-N' and new 'DDMMYYYY[-name]-N' entries.
-        $pattern = '(?ms)(target_devbox:.*?options:[ \t]*\r?\n(?:[^\r\n]*\r?\n)*?)((?:[ ]{10}- (?:[A-Z]{2}-)?\d{8}(?:-[A-Za-z0-9]+)*-\d+[^\r\n]*\r?\n)+)'
-        $match = [regex]::Match($content, $pattern)
-        $updated = $null
-
-        if ($match.Success) {
-            $existingBlock = $match.Groups[2].Value
-            $newBlock = $existingBlock.TrimEnd("`n") + "`n$newLine`n"
-            $updated = $content.Substring(0, $match.Groups[2].Index) + $newBlock + $content.Substring($match.Groups[2].Index + $match.Groups[2].Length)
-        } else {
-            # Fallback: anchor on 'options:' under target_devbox and insert immediately after it,
-            # skipping only leading comment lines. Works even when the options list is empty.
-            $fallback = '(?ms)(target_devbox:.*?options:[ \t]*\r?\n(?:[ ]{10}#[^\r\n]*\r?\n)*)'
-            $m2 = [regex]::Match($content, $fallback)
-            if ($m2.Success) {
-                $insertAt = $m2.Index + $m2.Length
-                $updated = $content.Substring(0, $insertAt) + "$newLine`n" + $content.Substring($insertAt)
-            }
-        }
-
-        if ($updated) {
-            Set-Content -Path $workflow -Value $updated -NoNewline -Encoding UTF8
-            Write-Ok "Added '$Label # $GhHandle' to workflow."
-        } else {
-            Write-Warn "Could not locate target_devbox.options block in $workflow."
-            Write-Warn "Add '$newLine' manually under target_devbox.options, then push."
-            $skipPush = $true
-        }
-    }
-
-    if (-not $skipPush) {
-        Write-Step "Committing and pushing to origin/main..."
-        Push-Location $RepoPath
-        try {
-            # Re-sync in case origin/main advanced during runner install.
-            git fetch origin main 2>&1 | Out-Host
-            if ($LASTEXITCODE -ne 0) { throw "git fetch failed (exit $LASTEXITCODE)" }
-            git pull --rebase origin main 2>&1 | Out-Host
-            if ($LASTEXITCODE -ne 0) { throw "git pull --rebase failed (exit $LASTEXITCODE); resolve manually then push" }
-
-            git add .github/workflows/run-ui-tests.yml
-            if ($LASTEXITCODE -ne 0) { throw "git add failed (exit $LASTEXITCODE)" }
-            git commit -m "Register DevBox runner: $Label" | Out-Host
-            if ($LASTEXITCODE -ne 0) { throw "git commit failed (exit $LASTEXITCODE)" }
-            git push origin main 2>&1 | Out-Host
-            if ($LASTEXITCODE -ne 0) { throw "git push failed (exit $LASTEXITCODE)" }
-            Write-Ok "Workflow updated on origin/main. Label '$Label' is now selectable."
-        } catch {
-            Write-Warn "Push failed: $_"
-            Write-Warn "Push manually from $RepoPath : git add -A; git commit -m 'Register $Label'; git push origin main"
-        } finally {
-            Pop-Location
-        }
-    }
-}
+# --- Done ---------------------------------------------------------------
+# The workflow YAML is static (devbox-1..devbox-4 slots); no edit or push
+# is needed. Registering this runner under the chosen slot name is
+# sufficient for GitHub to route jobs targeting that slot to this DevBox.
 
 Write-Host ""
 Write-Host "NEXT STEPS:" -ForegroundColor Yellow
 Write-Host "  1. Verify at: https://github.com/$Repo/settings/actions/runners"
 Write-Host "     Your runner '$Label' should show status = Idle."
-Write-Host "  2. Trigger a run from the Actions tab: pick a CSV + your label."
+Write-Host "  2. Trigger a run from the Actions tab: pick a CSV + '$Label'."
 Write-Host ""

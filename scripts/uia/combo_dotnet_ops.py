@@ -1,7 +1,8 @@
 """UIA helper for the Visual Studio ``Framework`` ComboBox on the Additional Information page.
 
-The rough test case for ``3-e2esanity-template-test`` needs a handful of
-operations against that combo that no existing script covers:
+The MAUI / template test cases (e.g. ``e2e-3-template-test``, ``e2e-20``)
+need a handful of operations against that combo that no existing script
+covers:
 
   list <hwnd>                Expand the combo, print each item's name on its
                              own stdout line, then collapse it.
@@ -27,6 +28,14 @@ operations against that combo that no existing script covers:
                              Exit 0 iff the combo's current default label
                              matches ``--expected`` exactly. Same
                              ``--kill-pid`` semantics as above.
+
+  select-by-name <hwnd> --expected "<label>"
+                             Expand, find the ListItem whose name equals
+                             ``--expected`` exactly, select it, collapse.
+                             Prints the selected label. Exit 1 if no item
+                             matches. Used to iterate a captured list of
+                             ``.NET x.y ...`` labels one at a time in the
+                             outer data-driven loop.
 
 All modes take the same combo selectors:
 
@@ -167,7 +176,23 @@ def cmd_list(args):
         combo.collapse()
     except Exception:
         pass
-    for name, _ in items:
+    # Filter to conforming ``.NET <major>.<minor>`` labels; skip anything the
+    # combo might expose that doesn't parse (defensive — the VS combo only
+    # holds ``.NET x.y ...`` entries today, but this keeps a bogus entry from
+    # ever ending up in the LOOP queue).
+    names = [name for name, _ in items if _rank(name) is not None]
+    # Sort latest-first: highest (major, minor) first; within the same (major,minor)
+    # LTS before non-LTS, non-preview before preview.
+    def _sort_key(n):
+        major, minor, lts, preview = _rank(n)
+        return (-major, -minor, 0 if lts else 1, 1 if preview else 0, n)
+    names.sort(key=_sort_key)
+    if args.out_file:
+        os.makedirs(os.path.dirname(os.path.abspath(args.out_file)) or ".", exist_ok=True)
+        with open(args.out_file, "w", encoding="utf-8") as f:
+            for n in names:
+                f.write(n + "\n")
+    for name in names:
         print(name)
 
 
@@ -238,6 +263,42 @@ def cmd_verify_default_is_latest(args):
         sys.exit(1)
 
 
+def cmd_select_by_name(args):
+    combo = connect_combo(args.hwnd, args.auto_id, args.name)
+    items = list_items(combo)
+    target_elem = None
+    for n, elem in items:
+        if n == args.expected:
+            target_elem = elem
+            break
+    if target_elem is None:
+        try:
+            combo.collapse()
+        except Exception:
+            pass
+        available = [n for n, _ in items]
+        print(f"ERROR: no item named {args.expected!r}; available: {available!r}",
+              file=sys.stderr)
+        sys.exit(1)
+    try:
+        target_elem.select()
+    except Exception:
+        try:
+            combo.select(args.expected)
+        except Exception as e:
+            print(f"ERROR: failed to select {args.expected!r}: {e}", file=sys.stderr)
+            sys.exit(1)
+    try:
+        combo.collapse()
+    except Exception:
+        pass
+    for _ in range(10):
+        if read_selected(combo) == args.expected:
+            break
+        time.sleep(0.1)
+    print(args.expected)
+
+
 def cmd_verify_default_equals(args):
     combo = connect_combo(args.hwnd, args.auto_id, args.name)
     selected = read_selected(combo)
@@ -271,13 +332,21 @@ def main():
         sp.add_argument("--kill-pid", dest="kill_pid", type=int, default=None,
                         help="on verification failure, kill this pid before exiting")
 
-    add_common(sub.add_parser("list"))
+    lp = sub.add_parser("list")
+    add_common(lp)
+    lp.add_argument("--out-file", dest="out_file", default=None,
+                    help="if set, also write each item name to this file "
+                         "(newline-delimited), for use as an item_queue file")
     add_common(sub.add_parser("latest"), (prefer_preview,))
     add_common(sub.add_parser("select-latest"), (prefer_preview,))
     add_common(sub.add_parser("verify-default-is-latest"), (prefer_preview, kill_pid_arg))
     ve = sub.add_parser("verify-default-equals")
     add_common(ve, (kill_pid_arg,))
     ve.add_argument("--expected", required=True, help="expected default combo label")
+
+    sn = sub.add_parser("select-by-name")
+    add_common(sn)
+    sn.add_argument("--expected", required=True, help="exact combo ListItem name to select")
 
     a = p.parse_args()
     handlers = {
@@ -286,6 +355,7 @@ def main():
         "select-latest": cmd_select_latest,
         "verify-default-is-latest": cmd_verify_default_is_latest,
         "verify-default-equals": cmd_verify_default_equals,
+        "select-by-name": cmd_select_by_name,
     }
     handlers[a.mode](a)
 

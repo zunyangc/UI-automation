@@ -3,6 +3,10 @@
 Supports:
 - PowerShell / classic console windows via UIA Document value/text pattern
 - Visual Studio Debug Console fallback via Ctrl+A / Ctrl+C clipboard extraction
+- Windows Terminal-hosted Visual Studio Debug Console via the "TermControl" text
+  control's name (no keystrokes -- this console closes on any keypress once the
+  app exits, so Ctrl+A/Ctrl+C would close it before it could be copied)
+- Other console hosts via Ctrl+A / Ctrl+C clipboard extraction
 - Last-resort visible UIA text dump
 """
 
@@ -15,7 +19,7 @@ from pywinauto.keyboard import send_keys
 
 try:
     import win32clipboard
-except Exception:
+except ImportError:
     win32clipboard = None
 
 try:
@@ -165,26 +169,31 @@ def _visible_text_dump(win):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("hwnd", type=lambda s: int(s, 0))
-    args = parser.parse_args()
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("hwnd", type=lambda s: int(s, 0))
+    a = p.parse_args()
+    app = Application(backend="uia").connect(handle=a.hwnd)
+    win = app.window(handle=a.hwnd)
 
-    app = Application(backend="uia").connect(handle=args.hwnd)
-    win = app.window(handle=args.hwnd)
-
-    # 1. Prefer real UIA document text.
+    # 1. Pre-existing behavior: classic console / PowerShell Document control.
     value = _try_uia_document_text(win)
     if value:
         print(value)
         return
 
-    # 2. Fallback for Visual Studio Debug Console / Windows console host.
+    # 2. Fallback for the Windows Terminal-hosted VS Debug Console (safe: no keystrokes).
+    value = _try_term_control_name_text(win)
+    if value:
+        print(value)
+        return
+
+    # 3. Fallback for other console hosts exposing only a plain Document/Value.
     value = _try_clipboard_console_read(win)
     if value:
         print(value)
         return
 
-    # 3. Last resort: dump visible UIA labels.
+    # 4. Last resort: dump visible UIA labels.
     print(_visible_text_dump(win))
 
 
