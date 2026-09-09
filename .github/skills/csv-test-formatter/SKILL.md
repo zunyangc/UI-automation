@@ -102,6 +102,7 @@ uv run python scripts\csvfmt\csv_loader.py test_cases\<name>.csv
 ```
 
 12. Fix every validation error before finishing.
+13. Add the generated `test_cases/<name>.csv` path to `workflow_dispatch.inputs.csv_spec.options` in `.github/workflows/run-ui-tests.yml`, using forward slashes and preserving the existing list order. Do not add it if it is already present.
 
 ## Output rule
 
