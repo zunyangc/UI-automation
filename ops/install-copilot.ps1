@@ -1,4 +1,4 @@
-# install-copilot.ps1 — Easy installer for the GitHub Copilot CLI.
+# ops/install-copilot.ps1 — Easy installer for the GitHub Copilot CLI.
 #
 # Installs BOTH (whichever is missing):
 #   1. The standalone agentic Copilot CLI  (the `copilot` command)
@@ -6,15 +6,15 @@
 # ...then triggers interactive login for each.
 #
 # Usage on a Windows 10/11 machine (from the repo root):
-#   .\install-copilot.ps1
+#   .\ops\install-copilot.ps1
 #
 # Or one-line, straight from GitHub:
-#   irm https://raw.githubusercontent.com/william051200/UI-automation/main/install-copilot.ps1 | iex
+#   irm https://raw.githubusercontent.com/william051200/UI-automation/main/ops/install-copilot.ps1 | iex
 #
 # If your execution policy blocks scripts, use:
-#   powershell -ExecutionPolicy Bypass -File .\install-copilot.ps1
+#   powershell -ExecutionPolicy Bypass -File .\ops\install-copilot.ps1
 #
-# Skip the interactive login prompts with:  .\install-copilot.ps1 -NoLogin
+# Skip the interactive login prompts with:  .\ops\install-copilot.ps1 -NoLogin
 
 [CmdletBinding()]
 param(

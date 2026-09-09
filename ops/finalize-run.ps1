@@ -1,3 +1,4 @@
+# ops/finalize-run.ps1
 <#
 .SYNOPSIS
     Post-run cleanup for UI-automation tests on a self-hosted DevBox runner.

@@ -1,10 +1,10 @@
-# install.ps1 — One-line bootstrap for UI-automation.
+# ops/install.ps1 — One-line bootstrap for UI-automation.
 #
 # Usage on a fresh Windows 10/11 machine:
-#   irm https://raw.githubusercontent.com/william051200/UI-automation/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/william051200/UI-automation/main/ops/install.ps1 | iex
 #
 # If your execution policy blocks scripts, use:
-#   powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/william051200/UI-automation/main/install.ps1 | iex"
+#   powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/william051200/UI-automation/main/ops/install.ps1 | iex"
 
 $ErrorActionPreference = "Stop"
 
@@ -77,14 +77,9 @@ if (Test-Path (Join-Path $RepoDir ".git")) {
     Write-Ok "Repo cloned."
 }
 
-# 4. uv sync --------------------------------------------------------------
-Write-Step "Installing Python interpreter + dependencies (uv sync)..."
-Push-Location $RepoDir
-try {
-    uv sync
-} finally {
-    Pop-Location
-}
+# 4. Python environment ---------------------------------------------------
+Write-Step "Installing Python interpreter + dependencies..."
+& (Join-Path $RepoDir 'ops\setup.ps1')
 Write-Ok "Environment ready."
 
 # 5. Done -----------------------------------------------------------------

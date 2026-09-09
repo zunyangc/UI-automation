@@ -34,11 +34,12 @@ Two marker-delimited sections, each with its own header row. Ragged rows are fin
 Section,Key,Value
 name,,<test_name>
 description,,"<one-line description>"
-artifacts,screenshot_dir,screenshots/{timestamp}
 
 # STEPS
 No,Main step,Trigger,script,args,wait_ms,capture,expect_exit,expected_contains,poll_total_ms,poll_interval_ms,screenshot_pass,screenshot_fail,Expected
 ```
+
+Do not add an `artifacts,screenshot_dir` row unless the test case needs a custom location — omitting it defaults to the standard `screenshots/{name}-{timestamp}` folder naming.
 
 ### `# STEPS` columns (exact order, from csv_schema.py)
 

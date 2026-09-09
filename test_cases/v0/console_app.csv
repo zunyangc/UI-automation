@@ -2,7 +2,6 @@
 Section,Key,Value
 name,,console_app
 description,,"Launch Visual Studio; create a C# Console App via the All-languages filter; capture the default selected target framework; create the project; open the project Properties and validate Output type is 'Console Application' and the target framework matches the captured value; double-click the project node and validate the .csproj <TargetFramework>; build the solution and verify 'Build succeeded'; click the toolbar Run button and validate the console output; then close Visual Studio. NOTE: several selectors here are Visual Studio version / UI-language dependent (language-filter combo, console-app template, Properties output-type/framework fields, the .csproj document, the Run button, and the spawned console window) and are flagged in the Expected column as needing live tuning."
-artifacts,screenshot_dir,screenshots/{timestamp}
 
 # STEPS
 No,Main step,Trigger,script,args,wait_ms,capture,expect_exit,expected_contains,poll_total_ms,poll_interval_ms,screenshot_pass,screenshot_fail,max_iter,Expected

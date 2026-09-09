@@ -1,0 +1,92 @@
+# CONFIG
+Section,Key,Value
+name,,e2e-16-lower_version_build
+description,,"Copies ConsoleApp1-80 and ConsoleApp1-90 zip builds from the \\bvtsrv2\team\e2eshare network share onto the Desktop, extracts each, then builds and runs each solution in Visual Studio, capturing a screenshot of each run."
+
+# STEPS
+No,step no,Main step,Trigger,script,args,wait_ms,capture,expect_exit,expected_contains,poll_total_ms,poll_interval_ms,screenshot_pass,screenshot_fail,max_iter,Expected
+1,1,Open Run dialog,Open the Run dialog using Win + R,scripts/input/key.py,"[""win+r""]",500,,,,,,,,,Run dialog appears.
+2,2,Enter network share,enter \\bvtsrv2\team\e2eshare,scripts/input/type_text.py,"[""\\\\bvtsrv2\\team\\e2eshare""]",300,,,,,,,,,
+2,3,,Press Enter to navigate to the share.,scripts/input/key.py,"[""enter""]",1200,,,,,,,,,
+2,4,,Locate the opened network-share Explorer window.,scripts/window/find_window.py,"[""(?i)e2eshare"", ""--min-height"", ""100"", ""--timeout-ms"", ""8000""]",,"{""vars.share_pid"": ""$.cols[0]"", ""vars.share_hwnd"": ""$.cols[1]""}",,,,,,,,Share window is found.
+3,5,"Select, copy, and paste both zips to Desktop",Select ConsoleApp1-80.zip and ConsoleApp1-90.zip from the network share; copy them and paste them onto the Desktop; verify each is present in the destination.,scripts/window/activate_window.py,"[""{vars.share_hwnd}""]",200,,,,,,,,,
+3,6,,Jump to the top of the file list.,scripts/input/key.py,"[""ctrl+home""]",300,,,,,,,,,
+3,7,,Type-ahead select ConsoleApp1-80.zip (scrolls it into view).,scripts/input/type_text.py,"[""ConsoleApp1-80.zip"", ""--interval"", ""0.01""]",500,,,,,,,,,
+3,8,,Locate ConsoleApp1-80.zip in the share window.,scripts/uia/find_control.py,"[""{vars.share_hwnd}"", ""--name"", ""ConsoleApp1-80.zip"", ""--control-type"", ""ListItem"", ""--visible""]",,"{""vars.zip80_x"": ""$.rows[1].cols[7]"", ""vars.zip80_y"": ""$.rows[1].cols[8]""}",,,,,,,,
+3,9,,Select ConsoleApp1-80.zip.,scripts/input/click.py,"[""{vars.zip80_x}"", ""{vars.zip80_y}""]",200,,,,,,,,,
+3,10,,Copy ConsoleApp1-80.zip.,scripts/input/key.py,"[""ctrl+c""]",200,,,,,,,,,
+3,11,,Open a Desktop Explorer window.,scripts/window/launch.py,"[""explorer.exe"", ""--args"", ""shell:Desktop""]",1200,,,,,,,,,
+3,12,,Locate the Desktop Explorer window.,scripts/window/find_window.py,"[""^Desktop - File Explorer$"", ""--min-height"", ""100"", ""--timeout-ms"", ""8000""]",,"{""vars.desktop_pid"": ""$.cols[0]"", ""vars.desktop_hwnd"": ""$.cols[1]""}",,,,,,,,Desktop window is found.
+3,13,,Activate the Desktop Explorer window.,scripts/window/activate_window.py,"[""{vars.desktop_hwnd}""]",200,,,,,,,,,
+3,14,,Paste ConsoleApp1-80.zip onto the Desktop.,scripts/input/key.py,"[""ctrl+v""]",800,,,,,,,,,
+3,15,,Jump to the top of the file list.,scripts/input/key.py,"[""ctrl+home""]",300,,,,,,,,,
+3,16,,Type-ahead select ConsoleApp1-80.zip (scrolls it into view).,scripts/input/type_text.py,"[""ConsoleApp1-80.zip"", ""--interval"", ""0.01""]",500,,,,,,,,,
+3,17,,Verify ConsoleApp1-80.zip is present on the Desktop.,scripts/uia/find_control.py,"[""{vars.desktop_hwnd}"", ""--name"", ""ConsoleApp1-80.zip"", ""--control-type"", ""ListItem"", ""--visible"", ""--timeout-ms"", ""5000""]",,,,,,,,,,File is present in the destination location.
+3,18,,Re-activate the share window.,scripts/window/activate_window.py,"[""{vars.share_hwnd}""]",200,,,,,,,,,
+3,19,,Jump to the top of the file list.,scripts/input/key.py,"[""ctrl+home""]",300,,,,,,,,,
+3,20,,Type-ahead select ConsoleApp1-90.zip (scrolls it into view).,scripts/input/type_text.py,"[""ConsoleApp1-90.zip"", ""--interval"", ""0.01""]",500,,,,,,,,,
+3,21,,Locate ConsoleApp1-90.zip in the share window.,scripts/uia/find_control.py,"[""{vars.share_hwnd}"", ""--name"", ""ConsoleApp1-90.zip"", ""--control-type"", ""ListItem"", ""--visible""]",,"{""vars.zip90_x"": ""$.rows[1].cols[7]"", ""vars.zip90_y"": ""$.rows[1].cols[8]""}",,,,,,,,
+3,22,,Select ConsoleApp1-90.zip.,scripts/input/click.py,"[""{vars.zip90_x}"", ""{vars.zip90_y}""]",200,,,,,,,,,
+3,23,,Copy ConsoleApp1-90.zip.,scripts/input/key.py,"[""ctrl+c""]",200,,,,,,,,,
+3,24,,Activate the Desktop Explorer window.,scripts/window/activate_window.py,"[""{vars.desktop_hwnd}""]",200,,,,,,,,,
+3,25,,Paste ConsoleApp1-90.zip onto the Desktop.,scripts/input/key.py,"[""ctrl+v""]",800,,,,,,,,,
+3,26,,Jump to the top of the file list.,scripts/input/key.py,"[""ctrl+home""]",300,,,,,,,,,
+3,27,,Type-ahead select ConsoleApp1-90.zip (scrolls it into view).,scripts/input/type_text.py,"[""ConsoleApp1-90.zip"", ""--interval"", ""0.01""]",500,,,,,,,,,
+3,28,,Verify ConsoleApp1-90.zip is present on the Desktop.,scripts/uia/find_control.py,"[""{vars.desktop_hwnd}"", ""--name"", ""ConsoleApp1-90.zip"", ""--control-type"", ""ListItem"", ""--visible"", ""--timeout-ms"", ""5000""]",,,,,,,,,,File is present in the destination location.
+3,29,,Close the network-share window; no longer needed.,scripts/window/close_window.py,"[""{vars.share_hwnd}"", ""--force""]",300,,,,,,,,,
+4,30,Locate ConsoleApp1-80.zip,"On the Desktop, locate the ConsoleApp1-80.zip",scripts/uia/find_control.py,"[""{vars.desktop_hwnd}"", ""--name"", ""ConsoleApp1-80.zip"", ""--control-type"", ""ListItem"", ""--visible""]",,"{""vars.zip80d_x"": ""$.rows[1].cols[7]"", ""vars.zip80d_y"": ""$.rows[1].cols[8]""}",,,,,,,,
+5,31,Extract All on ConsoleApp1-80.zip,Right-click ConsoleApp1-80.zip and select Extract All.,scripts/input/click.py,"[""{vars.zip80d_x}"", ""{vars.zip80d_y}"", ""--right""]",500,,,,,,,,,
+5,32,,Locate the context-menu popup.,scripts/window/find_window.py,"[""^PopupHost$"", ""--pid"", ""{vars.desktop_pid}"", ""--min-height"", ""200"", ""--timeout-ms"", ""3000""]",,"{""vars.menu80_hwnd"": ""$.cols[1]""}",,,,,,,,Context menu is found.
+5,33,,Invoke 'Extract All...' from the context menu.,scripts/uia/invoke_control.py,"[""{vars.menu80_hwnd}"", ""--auto-id"", ""extract"", ""--control-type"", ""MenuItem""]",800,,,,,,,,,
+6,34,Click Extract,Click Extract to unzip the file into the specified destination folder,scripts/window/find_window.py,"[""Extract Compressed"", ""--timeout-ms"", ""5000""]",,"{""vars.extract80_hwnd"": ""$.cols[1]""}",,,,,,,,Extract dialog is found.
+6,35,,Click the Extract button.,scripts/uia/invoke_control.py,"[""{vars.extract80_hwnd}"", ""--auto-id"", ""finishbutton"", ""--control-type"", ""Button""]",1000,,,,,,,,,
+6,36,,Verify the ConsoleApp1-80 folder was created.,scripts/uia/find_control.py,"[""{vars.desktop_hwnd}"", ""--name"", ""ConsoleApp1-80"", ""--control-type"", ""ListItem"", ""--match"", ""exact"", ""--visible"", ""--timeout-ms"", ""8000""]",,"{""vars.folder80_x"": ""$.rows[1].cols[7]"", ""vars.folder80_y"": ""$.rows[1].cols[8]""}",,,,,,,,Folder is extracted.
+7,37,Locate ConsoleApp1-90.zip,"On the Desktop, locate the ConsoleApp1-90.zip",scripts/uia/find_control.py,"[""{vars.desktop_hwnd}"", ""--name"", ""ConsoleApp1-90.zip"", ""--control-type"", ""ListItem"", ""--visible""]",,"{""vars.zip90d_x"": ""$.rows[1].cols[7]"", ""vars.zip90d_y"": ""$.rows[1].cols[8]""}",,,,,,,,
+8,38,Extract All on ConsoleApp1-90.zip,Right-click ConsoleApp1-90.zip and select Extract All.,scripts/input/click.py,"[""{vars.zip90d_x}"", ""{vars.zip90d_y}"", ""--right""]",500,,,,,,,,,
+8,39,,Locate the context-menu popup.,scripts/window/find_window.py,"[""^PopupHost$"", ""--pid"", ""{vars.desktop_pid}"", ""--min-height"", ""200"", ""--timeout-ms"", ""3000""]",,"{""vars.menu90_hwnd"": ""$.cols[1]""}",,,,,,,,Context menu is found.
+8,40,,Invoke 'Extract All...' from the context menu.,scripts/uia/invoke_control.py,"[""{vars.menu90_hwnd}"", ""--auto-id"", ""extract"", ""--control-type"", ""MenuItem""]",800,,,,,,,,,
+9,41,Click Extract,Click Extract to unzip the file into the specified destination folder,scripts/window/find_window.py,"[""Extract Compressed"", ""--timeout-ms"", ""5000""]",,"{""vars.extract90_hwnd"": ""$.cols[1]""}",,,,,,,,Extract dialog is found.
+9,42,,Click the Extract button.,scripts/uia/invoke_control.py,"[""{vars.extract90_hwnd}"", ""--auto-id"", ""finishbutton"", ""--control-type"", ""Button""]",1000,,,,,,,,,
+9,43,,Verify the ConsoleApp1-90 folder was created.,scripts/uia/find_control.py,"[""{vars.desktop_hwnd}"", ""--name"", ""ConsoleApp1-90"", ""--control-type"", ""ListItem"", ""--match"", ""exact"", ""--visible"", ""--timeout-ms"", ""8000""]",,"{""vars.folder90_x"": ""$.rows[1].cols[7]"", ""vars.folder90_y"": ""$.rows[1].cols[8]""}",,,,,,,,Folder is extracted.
+10,44,Open ConsoleApp1-90 folder,"On the Desktop, open the ConsoleApp1-90 folder.",scripts/input/click.py,"[""{vars.folder90_x}"", ""{vars.folder90_y}"", ""--double""]",1200,,,,,,,,,Folder opens in a new Explorer window.
+10,45,,Locate the newly opened ConsoleApp1-90 project-folder window.,scripts/window/find_window.py,"[""^ConsoleApp1-90 - File Explorer$"", ""--min-height"", ""100"", ""--timeout-ms"", ""8000""]",,"{""vars.proj90_hwnd"": ""$.cols[1]""}",,,,,,,,ConsoleApp1-90 folder window is found.
+11,46,Locate ConsoleApp1-90.sln,Locate ConsoleApp1-90.sln.,scripts/uia/find_control.py,"[""{vars.proj90_hwnd}"", ""--control-type"", ""ListItem"", ""--visible"", ""--timeout-ms"", ""5000""]",,"{""vars.inner90_x"": ""$.rows[1].cols[7]"", ""vars.inner90_y"": ""$.rows[1].cols[8]""}",,,,,,,,Extracted project subfolder is found.
+11,47,,Activate the project-folder window before opening the subfolder.,scripts/window/activate_window.py,"[""{vars.proj90_hwnd}""]",200,,,,,,,,,
+11,48,,Open the extracted project subfolder.,scripts/input/click.py,"[""{vars.inner90_x}"", ""{vars.inner90_y}"", ""--double""]",1200,,,,,,,,,
+11,49,,Locate the .sln file.,scripts/uia/find_control.py,"[""{vars.proj90_hwnd}"", ""--name"", ""\\.sln$"", ""--control-type"", ""ListItem"", ""--match"", ""regex"", ""--visible"", ""--timeout-ms"", ""5000""]",,"{""vars.sln90_x"": ""$.rows[1].cols[7]"", ""vars.sln90_y"": ""$.rows[1].cols[8]""}",,,,,,,,ConsoleApp1-90.sln is found.
+12,50,Launch ConsoleApp1-90.sln,Double-click ConsoleApp1-90.sln.,scripts/input/click.py,"[""{vars.sln90_x}"", ""{vars.sln90_y}"", ""--double""]",1500,,,,,,,,,
+13,51,Wait for Visual Studio,Wait for Visual Studio to launch and load the solution.,scripts/window/find_window.py,"[""(?i)ConsoleApp1.*Visual Studio"", ""--min-height"", ""400"", ""--timeout-ms"", ""90000""]",,"{""vars.vs90_hwnd"": ""$.cols[1]""}",,,,,,,,Visual Studio main window is found with the solution loaded.
+14,52,Build solution,"build by clicking on build on top, and build  solution",scripts/window/activate_window.py,"[""{vars.vs90_hwnd}""]",300,,,,,,,,,
+14,53,,Open the Build menu.,scripts/uia/find_control.py,"[""{vars.vs90_hwnd}"", ""--control-type"", ""MenuItem"", ""--name"", ""Build"", ""--timeout-ms"", ""10000""]",,"{""vars.build90_x"": ""$.rows[1].cols[7]"", ""vars.build90_y"": ""$.rows[1].cols[8]""}",,,,,,,,
+14,54,,Click the Build menu.,scripts/input/click.py,"[""{vars.build90_x}"", ""{vars.build90_y}""]",500,,,,,,,,,
+14,55,,Locate Build Solution.,scripts/uia/find_control.py,"[""{vars.vs90_hwnd}"", ""--control-type"", ""MenuItem"", ""--name"", ""Build Solution""]",,"{""vars.buildsol90_x"": ""$.rows[1].cols[7]"", ""vars.buildsol90_y"": ""$.rows[1].cols[8]""}",,,,,,,,
+14,56,,Click Build Solution.,scripts/input/click.py,"[""{vars.buildsol90_x}"", ""{vars.buildsol90_y}""]",500,,,,,,,,,
+14,57,,Validate the build succeeded.,scripts/uia/read_console.py,"[""{vars.vs90_hwnd}""]",,,,0 failed,90000,1000,,,,Build output reports 0 failed.
+15,58,Run and validate,"run and validate result, take screenshot",scripts/input/key.py,"[""ctrl+f5""]",2500,,,,,,,,,ConsoleApp1-90 runs.
+15,59,,Take a screenshot of the run result.,scripts/files/screenshot.py,,,,,,,,"[""{ss}_ConsoleApp1-90_run.png""]","[""{ss}_ConsoleApp1-90_run_FAIL.png""]",,Screenshot saved.
+16,60,Close Visual Studio,Close Visual Studio,scripts/window/close_window.py,"[""{vars.vs90_hwnd}"", ""--force"", ""--grace-ms"", ""5000"", ""--wait-process-ms"", ""5000""]",500,,,,,,,,,Visual Studio closes.
+17,61,Open Desktop for ConsoleApp1-80,"On the Desktop, open the ConsoleApp1-80 folder.",scripts/window/launch.py,"[""explorer.exe"", ""--args"", ""shell:Desktop""]",1200,,,,,,,,,
+17,62,,Locate the Desktop Explorer window.,scripts/window/find_window.py,"[""^Desktop - File Explorer$"", ""--min-height"", ""100"", ""--timeout-ms"", ""8000""]",,"{""vars.desktop80_pid"": ""$.cols[0]"", ""vars.desktop80_hwnd"": ""$.cols[1]""}",,,,,,,,
+17,63,,Activate the Desktop Explorer window.,scripts/window/activate_window.py,"[""{vars.desktop80_hwnd}""]",200,,,,,,,,,
+17,64,,Locate any visible item to give the file list keyboard focus.,scripts/uia/find_control.py,"[""{vars.desktop80_hwnd}"", ""--control-type"", ""ListItem"", ""--nth"", ""1"", ""--visible""]",,"{""vars.desktop80_anchor_x"": ""$.rows[1].cols[7]"", ""vars.desktop80_anchor_y"": ""$.rows[1].cols[8]""}",,,,,,,,
+17,65,,Click the item to focus the file list.,scripts/input/click.py,"[""{vars.desktop80_anchor_x}"", ""{vars.desktop80_anchor_y}""]",200,,,,,,,,,
+17,66,,Jump to the top of the file list.,scripts/input/key.py,"[""ctrl+home""]",300,,,,,,,,,
+17,67,,Type-ahead select ConsoleApp1-80 (scrolls it into view).,scripts/input/type_text.py,"[""ConsoleApp1-80"", ""--interval"", ""0.01""]",500,,,,,,,,,
+17,68,,Locate the ConsoleApp1-80 folder.,scripts/uia/find_control.py,"[""{vars.desktop80_hwnd}"", ""--name"", ""ConsoleApp1-80"", ""--control-type"", ""ListItem"", ""--match"", ""exact"", ""--visible"", ""--timeout-ms"", ""5000""]",,"{""vars.folder80b_x"": ""$.rows[1].cols[7]"", ""vars.folder80b_y"": ""$.rows[1].cols[8]""}",,,,,,,,
+17,69,,Open the ConsoleApp1-80 folder.,scripts/input/click.py,"[""{vars.folder80b_x}"", ""{vars.folder80b_y}"", ""--double""]",1200,,,,,,,,,Folder opens in a new Explorer window.
+17,70,,Locate the newly opened ConsoleApp1-80 project-folder window.,scripts/window/find_window.py,"[""^ConsoleApp1-80 - File Explorer$"", ""--min-height"", ""100"", ""--timeout-ms"", ""8000""]",,"{""vars.proj80_hwnd"": ""$.cols[1]""}",,,,,,,,ConsoleApp1-80 folder window is found.
+18,71,Locate ConsoleApp1-80.sln,Locate ConsoleApp1-80.sln.,scripts/uia/find_control.py,"[""{vars.proj80_hwnd}"", ""--control-type"", ""ListItem"", ""--visible"", ""--timeout-ms"", ""5000""]",,"{""vars.inner80_x"": ""$.rows[1].cols[7]"", ""vars.inner80_y"": ""$.rows[1].cols[8]""}",,,,,,,,Extracted project subfolder is found.
+18,72,,Activate the project-folder window before opening the subfolder.,scripts/window/activate_window.py,"[""{vars.proj80_hwnd}""]",200,,,,,,,,,
+18,73,,Open the extracted project subfolder.,scripts/input/click.py,"[""{vars.inner80_x}"", ""{vars.inner80_y}"", ""--double""]",1200,,,,,,,,,
+18,74,,Locate the .sln file.,scripts/uia/find_control.py,"[""{vars.proj80_hwnd}"", ""--name"", ""\\.sln$"", ""--control-type"", ""ListItem"", ""--match"", ""regex"", ""--visible"", ""--timeout-ms"", ""5000""]",,"{""vars.sln80_x"": ""$.rows[1].cols[7]"", ""vars.sln80_y"": ""$.rows[1].cols[8]""}",,,,,,,,ConsoleApp1-80.sln is found.
+19,75,Launch ConsoleApp1-80.sln,Double-click ConsoleApp1-80.sln.,scripts/input/click.py,"[""{vars.sln80_x}"", ""{vars.sln80_y}"", ""--double""]",1500,,,,,,,,,
+20,76,Wait for Visual Studio,Wait for Visual Studio to launch and load the solution.,scripts/window/find_window.py,"[""(?i)ConsoleApp1.*Visual Studio"", ""--min-height"", ""400"", ""--timeout-ms"", ""90000""]",,"{""vars.vs80_hwnd"": ""$.cols[1]""}",,,,,,,,Visual Studio main window is found with the solution loaded.
+21,77,Build solution,"build by clicking on build on top, and build  solution",scripts/window/activate_window.py,"[""{vars.vs80_hwnd}""]",300,,,,,,,,,
+21,78,,Open the Build menu.,scripts/uia/find_control.py,"[""{vars.vs80_hwnd}"", ""--control-type"", ""MenuItem"", ""--name"", ""Build"", ""--timeout-ms"", ""10000""]",,"{""vars.build80_x"": ""$.rows[1].cols[7]"", ""vars.build80_y"": ""$.rows[1].cols[8]""}",,,,,,,,
+21,79,,Click the Build menu.,scripts/input/click.py,"[""{vars.build80_x}"", ""{vars.build80_y}""]",500,,,,,,,,,
+21,80,,Locate Build Solution.,scripts/uia/find_control.py,"[""{vars.vs80_hwnd}"", ""--control-type"", ""MenuItem"", ""--name"", ""Build Solution""]",,"{""vars.buildsol80_x"": ""$.rows[1].cols[7]"", ""vars.buildsol80_y"": ""$.rows[1].cols[8]""}",,,,,,,,
+21,81,,Click Build Solution.,scripts/input/click.py,"[""{vars.buildsol80_x}"", ""{vars.buildsol80_y}""]",500,,,,,,,,,
+21,82,,Validate the build succeeded.,scripts/uia/read_console.py,"[""{vars.vs80_hwnd}""]",,,,0 failed,90000,1000,,,,Build output reports 0 failed.
+22,83,Run and validate,"run and validate result, take screenshot",scripts/input/key.py,"[""ctrl+f5""]",2500,,,,,,,,,ConsoleApp1-80 runs.
+22,84,,Take a screenshot of the run result.,scripts/files/screenshot.py,,,,,,,,"[""{ss}_ConsoleApp1-80_run.png""]","[""{ss}_ConsoleApp1-80_run_FAIL.png""]",,Screenshot saved.
+23,85,Close Visual Studio,Close Visual Studio,scripts/window/close_window.py,"[""{vars.vs80_hwnd}"", ""--force"", ""--grace-ms"", ""5000"", ""--wait-process-ms"", ""5000""]",500,,,,,,,,,Visual Studio closes.

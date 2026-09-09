@@ -16,22 +16,22 @@ This file follows the [agents.md](https://agents.md/) convention and is loaded a
 - `docs/file-structure.md` — what every file/folder is for.
 - `docs/reproducibility.md` — why runs must be bit-identical.
 - `docs/troubleshooting.md` — DPI, multi-monitor, UI language gotchas.
-- `test_cases/powershell_echo_loop.csv` — canonical example.
+- `test_cases/_template.csv` — canonical test-case layout.
 - `scripts/*.py` — one script per step `type`.
 
 ## Hard rules when authoring or editing a test case
 
-1. A test case is ONE `.csv` with two marker-delimited sections: `# CONFIG` (Section/Key/Value rows: `name`, `description`, `artifacts` → `screenshot_dir`) and `# STEPS` (one row per step). Do not invent new config keys.
+1. A test case is ONE `.csv` with two marker-delimited sections: `# CONFIG` (Section/Key/Value rows: `name`, `description`, optionally `artifacts` → `screenshot_dir` to override the default folder name) and `# STEPS` (one row per step). Do not invent new config keys.
 2. **Do NOT randomize values.** Reproducibility requires identical values every run.
 3. Every real step row needs a `script` and a `Trigger` (becomes the step `description`). Set delays via the `wait_ms` column in **literal milliseconds**. Always populate the `step no` column with a sequential global counter (1, 2, 3… across every step row, including loop bodies) — don't leave it blank.
 4. **Selectors:** prefer `auto_id` + `name` together. `scripts/uia/find_control.py` tries AutomationId first, falls back to name. Always pass `parent=` a captured window hwnd.
 5. **Capture** window/control handles with the `capture` column as JSON (e.g. `{"vars.<name>": "$.cols[1]"}`) on `find_window` / `find_control` steps; reference them as `{vars.<name>}` in later steps.
-6. Artifact paths use `{timestamp}` (substituted at run start, UTC). Default screenshot dir: `screenshots/{timestamp}`. For ordered screenshot names use the `{ss}` placeholder in `screenshot_pass` / `screenshot_fail` filenames (renders `ss_1`, `ss_2`, ...; continuous across the whole run including loops, so it never restarts — optionally add `{n}` for the iteration index, e.g. `{ss}_{n}_name.png`).
+6. Artifact paths use `{timestamp}` (substituted at run start, UTC) and `{name}` (the CONFIG `name` value). Default screenshot dir: `screenshots/{name}-{timestamp}` — don't add an `artifacts,screenshot_dir` row unless a test case genuinely needs a custom location; leaving it out keeps the standard `<name>-<timestamp>` folder naming so screenshots are easy to trace back to their test case. For ordered screenshot names use the `{ss}` placeholder in `screenshot_pass` / `screenshot_fail` filenames (renders `ss_1`, `ss_2`, ...; continuous across the whole run including loops, so it never restarts — optionally add `{n}` for the iteration index, e.g. `{ss}_{n}_name.png`).
 7. For console assertions set the `expected_contains` column (with `poll_total_ms` / `poll_interval_ms` in literal milliseconds).
 8. For file assertions use `assert_file` (supports `--negate`, `--contains`, `--delete`).
 9. Do **not** invent new step types. If something doesn't fit, ask before extending the schema.
 10. When emitting a new test case, output ONE complete CSV in a single fenced block; no surrounding prose unless the user asks for an explanation.
-11. **Minimize waits.** Keep test runs fast: prefer polling assertions (`expected_contains` with `poll_total_ms`/`poll_interval_ms`, or `wait_for`) over long fixed `wait_ms` whenever there's an observable state to wait on. When a fixed `wait_ms` is unavoidable, use the smallest value that reliably works plus a small safety margin — don't pad delays "to be safe". This is guidance only: don't randomize values and keep them identical every run.
+11. **Minimize waits.** When a step has an observable completion state, use a polling assertion (`expected_contains` with `poll_total_ms`/`poll_interval_ms`, or `wait_for`), especially for asynchronous operations such as app/window launch, build/compile, project scaffolding, or other heavy IDE work. To tolerate slower machines, raise `poll_total_ms` rather than adding `wait_ms`; polling exits early when the condition is met, while a fixed wait always consumes its full duration. Keep `poll_interval_ms` responsive (typically 200-500ms). Use fixed `wait_ms` only when no completion state can be observed, setting it from the observed worst-case duration plus a modest safety margin. Adjust only steps with evidence of timing risk—never blanket-pad waits, randomize values, or vary them between runs.
 12. **Keep paths machine-portable.** Never hardcode a user/profile path (e.g. `C:\Users\<you>`) — resolve the home dir via `scripts/files/print_home.py`, capture `{vars.home}`, and build absolute paths from it. Locate Visual Studio via `scripts/window/find_devenv.py` → `{vars.devenv}` rather than a literal install path. Use `{timestamp}` for artifact dirs, match window titles by regex (not user-specific text), and discover machine-varying values (SDK/runtime versions, drive letters) at runtime instead of baking them in, so a case authored on one PC/user runs unchanged on another.
 
 ## Iterating on failures
@@ -52,7 +52,7 @@ Windows 10/11, PowerShell, Python via `uv` with pins in `requirements.lock.txt` 
 ## Style and scope
 
 - Make surgical changes. Don't touch unrelated code or randomize anything that affects reproducibility.
-- Don't commit secrets or generated `screenshots/{timestamp}/` artifacts.
+- Don't commit secrets or generated `screenshots/{name}-{timestamp}/` artifacts.
 - Don't add new linters, formatters, or test frameworks without being asked.
 
 ## Documentation style (Markdown)

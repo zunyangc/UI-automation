@@ -8,13 +8,12 @@
     then never again for that DevBox. After it completes, your DevBox
     is a runner reachable from your fork's Actions tab.
 
-    Normally invoked by scripts/setup-remote-runner.ps1 (see docs/REMOTE_RUNNING.md).
+    Normally invoked by ops/setup-remote-runner.ps1 (see docs/REMOTE_RUNNING.md).
 
 .PARAMETER Label
-    The label to register this runner under. Accepted formats:
-      <DDMMYYYY>-<N>                    e.g. 12082026-1
-      <DDMMYYYY>-<Name>-<N>             e.g. 12082026-desk-1
-      <INITIALS>-<DDMMYYYY>-<N>         (legacy) e.g. ZY-24072026-1
+    The DevBox slot to register this runner under. Must be one of the
+    static slots exposed by .github/workflows/run-ui-tests.yml:
+      devbox-1, devbox-2, devbox-3, devbox-4
 
 .PARAMETER Repo
     The GitHub repo to register the runner against (must be YOUR fork).
@@ -32,10 +31,10 @@
     $HOME\UI-automation
 
 .EXAMPLE
-    .\scripts\setup-runner.ps1 -Label 12082026-1
+    .\ops\setup-runner.ps1 -Label devbox-1
 
 .EXAMPLE
-    .\scripts\setup-runner.ps1 -Label 12082026-desk-1 -Token ABCDEF...
+    .\ops\setup-runner.ps1 -Label devbox-2 -Token ABCDEF...
 
 .NOTES
     Must be run in an Administrator PowerShell (installing a Scheduled
@@ -45,7 +44,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidatePattern('^([A-Z]{2}-)?\d{8}(-[A-Za-z0-9]+)*-\d+$')]
+    [ValidatePattern('^devbox-[1-4]$')]
     [string]$Label,
 
     [string]$Repo,
@@ -93,13 +92,9 @@ if (-not $Repo) {
     }
     Write-Ok "Detected repo from origin: $Repo"
     if ($Repo -match '^william051200/') {
-        throw "Origin still points at the upstream repo. Fork william051200/UI-automation to your account, re-clone from your fork, and re-run setup-remote-runner.ps1."
+        throw "Origin still points at the upstream repo. Fork william051200/UI-automation to your account, re-clone from your fork, and re-run ops\setup-remote-runner.ps1."
     }
 }
-
-# Extract GitHub handle from the resolved repo (owner part) -- used as the
-# commenting/attribution name next to the label in the workflow file.
-$GhHandle = ($Repo -split '/')[0]
 
 # --- Prereqs: uv, git, python --------------------------------------------
 Write-Step "Checking prerequisites (uv, git, python)..."
@@ -156,14 +151,33 @@ $asset  = $latest.assets | Where-Object { $_.name -like 'actions-runner-win-x64-
 if (-not $asset) { throw "Could not find a Windows x64 runner asset in the latest release." }
 
 $zip = Join-Path $InstallRoot $asset.name
+# Validate any existing zip by size. A truncated download from an earlier
+# aborted run will fail extraction with "End of Central Directory record
+# could not be found."
+if (Test-Path $zip) {
+    $localSize = (Get-Item $zip).Length
+    if ($localSize -ne $asset.size) {
+        Write-Warn "Existing '$($asset.name)' is $localSize bytes (expected $($asset.size)); re-downloading..."
+        Remove-Item $zip -Force
+    }
+}
 if (-not (Test-Path $zip)) {
+    $ProgressPreference = 'SilentlyContinue'
     Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip
 }
 
 if (-not (Test-Path (Join-Path $InstallRoot 'config.cmd'))) {
     Write-Step "Extracting runner..."
     Add-Type -AssemblyName System.IO.Compression.FileSystem
-    [System.IO.Compression.ZipFile]::ExtractToDirectory($zip, $InstallRoot)
+    try {
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($zip, $InstallRoot)
+    } catch [System.IO.InvalidDataException] {
+        Write-Warn "Zip appears corrupt; re-downloading and retrying..."
+        Remove-Item $zip -Force
+        $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($zip, $InstallRoot)
+    }
 }
 
 # --- Configure runner (NOT as service: UI automation needs the interactive
@@ -213,73 +227,14 @@ try {
     Write-Warn "after each reboot/logon."
 }
 
-# --- Update workflow YAML to expose this label in the dropdown ------------
-Write-Step "Adding '$Label' to .github/workflows/run-ui-tests.yml..."
-
-$workflow = Join-Path $RepoPath '.github/workflows/run-ui-tests.yml'
-if (-not (Test-Path $workflow)) {
-    Write-Warn "Workflow file not found at $workflow; skipping YAML edit."
-    Write-Warn "Add '- $Label   # $GhHandle' manually under target_devbox.options."
-} else {
-    $content = Get-Content -Path $workflow -Raw
-    $newLine = "          - $Label # $GhHandle"
-
-    if ($content -match [regex]::Escape("- $Label")) {
-        Write-Ok "Label '$Label' is already present in the workflow -- nothing to do."
-        $skipPush = $true
-    } else {
-        $skipPush = $false
-        # Primary: find target_devbox.options block and append after the last existing bullet line.
-        # Accept both legacy 'XX-DDMMYYYY-N' and new 'DDMMYYYY[-name]-N' entries.
-        $pattern = '(?ms)(target_devbox:.*?options:[ \t]*\r?\n(?:[^\r\n]*\r?\n)*?)((?:[ ]{10}- (?:[A-Z]{2}-)?\d{8}(?:-[A-Za-z0-9]+)*-\d+[^\r\n]*\r?\n)+)'
-        $match = [regex]::Match($content, $pattern)
-        $updated = $null
-
-        if ($match.Success) {
-            $existingBlock = $match.Groups[2].Value
-            $newBlock = $existingBlock.TrimEnd("`n") + "`n$newLine`n"
-            $updated = $content.Substring(0, $match.Groups[2].Index) + $newBlock + $content.Substring($match.Groups[2].Index + $match.Groups[2].Length)
-        } else {
-            # Fallback: anchor on 'options:' under target_devbox and insert immediately after it,
-            # skipping only leading comment lines. Works even when the options list is empty.
-            $fallback = '(?ms)(target_devbox:.*?options:[ \t]*\r?\n(?:[ ]{10}#[^\r\n]*\r?\n)*)'
-            $m2 = [regex]::Match($content, $fallback)
-            if ($m2.Success) {
-                $insertAt = $m2.Index + $m2.Length
-                $updated = $content.Substring(0, $insertAt) + "$newLine`n" + $content.Substring($insertAt)
-            }
-        }
-
-        if ($updated) {
-            Set-Content -Path $workflow -Value $updated -NoNewline
-            Write-Ok "Added '$Label # $GhHandle' to workflow."
-        } else {
-            Write-Warn "Could not locate target_devbox.options block in $workflow."
-            Write-Warn "Add '$newLine' manually under target_devbox.options, then push."
-            $skipPush = $true
-        }
-    }
-
-    if (-not $skipPush) {
-        Write-Step "Committing and pushing to origin/main..."
-        Push-Location $RepoPath
-        try {
-            git add .github/workflows/run-ui-tests.yml
-            git commit -m "Register DevBox runner: $Label" | Out-Host
-            git push origin main | Out-Host
-            Write-Ok "Workflow updated on origin/main. Label '$Label' is now selectable."
-        } catch {
-            Write-Warn "Push failed: $_"
-            Write-Warn "Push manually from $RepoPath : git add -A; git commit -m 'Register $Label'; git push origin main"
-        } finally {
-            Pop-Location
-        }
-    }
-}
+# --- Done ---------------------------------------------------------------
+# The workflow YAML is static (devbox-1..devbox-4 slots); no edit or push
+# is needed. Registering this runner under the chosen slot name is
+# sufficient for GitHub to route jobs targeting that slot to this DevBox.
 
 Write-Host ""
 Write-Host "NEXT STEPS:" -ForegroundColor Yellow
 Write-Host "  1. Verify at: https://github.com/$Repo/settings/actions/runners"
 Write-Host "     Your runner '$Label' should show status = Idle."
-Write-Host "  2. Trigger a run from the Actions tab: pick a CSV + your label."
+Write-Host "  2. Trigger a run from the Actions tab: pick a CSV + '$Label'."
 Write-Host ""

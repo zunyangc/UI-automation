@@ -21,7 +21,14 @@ except Exception:
 def find_dialog(title_rx, backend, deadline):
     rx = re.compile(title_rx)
     while True:
-        for w in Desktop(backend=backend).windows():
+        try:
+            windows = Desktop(backend=backend).windows()
+        except Exception:
+            # A window can close mid-enumeration (e.g. a transient dialog from a
+            # prior step), which raises rather than just skipping that window.
+            # Tolerant by design: retry on the next poll instead of crashing.
+            windows = []
+        for w in windows:
             try:
                 if rx.search(w.window_text() or ""):
                     return w

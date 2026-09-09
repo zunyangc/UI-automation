@@ -9,7 +9,7 @@ This works with [GitHub Copilot CLI](https://github.com/github/gh-copilot) or an
 - Repo installed per the [README](../README.md) (`uv`, Python, deps).
 - An AI agent installed and authenticated. The quickest path is the bundled installer, which sets up both the standalone `copilot` CLI and the `gh copilot` extension and walks you through login:
   ```powershell
-  .\install-copilot.ps1
+  .\ops\install-copilot.ps1
   ```
 - The target Windows app reachable from the Start menu (or with a known launch path).
 
@@ -57,10 +57,10 @@ The agent writes `test_cases/notepad_save.csv`, runs it, and reports the result.
 ## More example prompts
 
 **Run an existing scenario** (no authoring):
-> Run `.\run.ps1 test_cases\powershell_echo_loop.csv -q` and report only the exit code and any FAIL lines.
+> Run `.\run.ps1 test_cases\<test-case>.csv -q` and report only the exit code and any FAIL lines.
 
 **Variant of an existing scenario:**
-> Use `test_cases/powershell_echo_loop.csv` as a template to create `test_cases/cmd_echo.csv` that opens Command Prompt instead of PowerShell and echoes the four strings, then validate it.
+> Use `test_cases\_template.csv` to create `test_cases\<test-case>.csv` for the requested scenario, then validate it.
 
 **Repeat-until (unknown count):**
 > In `test_cases/<name>.csv`, keep clicking the next "Vulnerable" row until none remain, using a `# LOOP` block. Loops are unrolled otherwise.

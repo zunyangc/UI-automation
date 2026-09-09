@@ -7,33 +7,35 @@ Declarative UI-automation toolkit for Windows desktop apps. Drives mouse, keyboa
 One PowerShell command on a fresh Windows 10/11 machine:
 
 ```powershell
-irm https://raw.githubusercontent.com/william051200/UI-automation/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/william051200/UI-automation/main/ops/install.ps1 | iex
 ```
 
 This installs `uv` + Python + `git` as needed, clones the repo to `%USERPROFILE%\UI-automation`, and installs all pinned dependencies.
 
-## Run the example
+## Run a test case
 
 ```powershell
 cd $HOME\UI-automation
-.\run.ps1 test_cases\powershell_echo_loop.csv
+.\run.ps1 test_cases\<test-case>.csv
 ```
 
-(equivalent to `uv run python run_test.py test_cases\powershell_echo_loop.csv`.)
+(equivalent to `uv run python run_test.py test_cases\<test-case>.csv`.)
 
 Scenarios are authored as readable CSV files — `run.ps1` loads the `.csv` directly:
 
 ```powershell
-.\run.ps1 test_cases\powershell_echo_loop.csv -q
+.\run.ps1 test_cases\<test-case>.csv -q
 ```
 
 See [CSV test-case format](docs/csv-test-format.md) for the file layout, the in-memory loader, and the `csv-test-formatter` skill.
 
-The example opens PowerShell via Start menu, echoes 4 fixed strings, validates each via UIA, saves a screenshot per iteration, then closes the window with a mouse-click on the UIA-located Close button.
+Replace `<test-case>` with a filename from the [test-case directory](docs/test-cases.md).
 
 Exit codes: `0` pass, `1` assertion failed, `2` runner error.
 
 Add `-q` (or `--quiet`) to suppress per-step echo and successful subcommand stdout; failures, stderr, and the final RESULT line are always shown.
+
+**On any step failure**, before reporting `RESULT: FAIL`, the runner automatically: screenshots the current UI state, screenshots the console/log window if the CSV captured one (a `capture` var whose name contains `cmd`/`console`, e.g. `vars.cmd_hwnd`), and force-closes every window handle the CSV captured (via `close_window.py --force`) so a failed run doesn't leave apps/consoles orphaned for the next run. Each of these is best-effort and never masks the original failure.
 
 ## Author a new scenario
 
@@ -72,20 +74,20 @@ actions" → Save.
 **One-time DevBox setup** (RDP in, admin PowerShell — one line):
 
 ```powershell
-irm https://raw.githubusercontent.com/<your-handle>/UI-automation/main/scripts/setup-remote-runner.ps1 | iex
+irm https://raw.githubusercontent.com/<your-handle>/UI-automation/main/ops/setup-remote-runner.ps1 | iex
 ```
 
 The bootstrap clones your fork, installs `uv` + deps, prompts once for a
-runner-registration token, auto-composes a `<DDMMYYYY>[-<suffix>]-<N>`
-label, registers the runner, and pushes the workflow update to your
-fork's `main`. See [`docs/REMOTE_RUNNING.md`](docs/REMOTE_RUNNING.md) for
-the full walkthrough.
+GitHub PAT (`repo` scope), shows you which of the 4 static DevBox slots
+(`devbox-1`..`devbox-4`) are free on your fork, lets you claim one, and
+registers the runner under that slot. The workflow YAML is never edited.
+See [`docs/REMOTE_RUNNING.md`](docs/REMOTE_RUNNING.md) for the full walkthrough.
 
 **Day-to-day (browser only):** Open your fork's Actions tab
 (`https://github.com/<your-handle>/UI-automation/actions/workflows/run-ui-tests.yml`) →
-**Run workflow** → pick a CSV + your DevBox label.
+**Run workflow** → pick a CSV + your DevBox slot (`devbox-N`).
 
-Full guide, including the label convention, per-run cleanup behaviour, and
+Full guide, including the slot model, per-run cleanup behaviour, and
 troubleshooting: [`docs/REMOTE_RUNNING.md`](docs/REMOTE_RUNNING.md).
 
 ## Using with Copilot CLI
@@ -97,13 +99,13 @@ If you have [GitHub Copilot CLI](https://github.com/github/gh-copilot) (or any o
 Don't have it yet? Run the bundled installer. It sets up **both** the standalone agentic `copilot` CLI and the `gh copilot` extension (whichever is missing), then walks you through login:
 
 ```powershell
-.\install-copilot.ps1
+.\ops\install-copilot.ps1
 ```
 
 Or one-line, straight from GitHub:
 
 ```powershell
-irm https://raw.githubusercontent.com/william051200/UI-automation/main/install-copilot.ps1 | iex
+irm https://raw.githubusercontent.com/william051200/UI-automation/main/ops/install-copilot.ps1 | iex
 ```
 
 Pass `-NoLogin` to install without the interactive sign-in prompts.

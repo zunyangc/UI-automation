@@ -2,8 +2,6 @@
 Section,Key,Value,,,,,,,,,,,,,,
 name,,vs_nuget,,,,,,,,,,,,,,
 description,,"Launch Visual Studio; create a C# Windows Forms App (.NET Framework); add a Visual Basic Class Library (.NET Standard) to the same solution; add a project reference from the class library to the Windows Forms app; open NuGet Package Manager on the class library, install EasyPost.NetStandard; then filter to vulnerable packages and update each to its latest stable version in a loop until none remain; finally build the solution and verify 'Build succeeded'. NOTE: many selectors here are Visual Studio version / UI-language dependent (language-filter combos, .NET Standard framework item, project-reference checkbox, the 'Show vulnerable' control, and the vulnerable-package list probe) and are flagged in the Expected column as needing live tuning.",,,,,,,,,,,,,,
-artifacts,screenshot_dir,screenshots/{timestamp},,,,,,,,,,,,,,
-,,,,,,,,,,,,,,,,
 # STEPS,,,,,,,,,,,,,,,,
 No,step no,Main step,Trigger,script,args,wait_ms,capture,expect_exit,expected_contains,poll_total_ms,poll_interval_ms,screenshot_pass,screenshot_fail,max_iter,Expected,
 1,1,Create WinForms App (.NET Framework C#),Open Start menu via Win key.,scripts/input/key.py,"[""win""]",700,,,,,,,,,,

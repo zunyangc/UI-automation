@@ -137,6 +137,13 @@ Sends WM_CLOSE. If still alive after `--grace-ms`, exits 2 unless `--force` (the
 close_window.py <hwnd> [--grace-ms 2000] [--force]
 ```
 
+### `close_windows_matching.py` — close every open window matching a title regex
+Sweeps all currently open top-level windows (like `find_window.py --all`) and sends WM_CLOSE to each one whose title matches `title_regex`, waiting up to `--grace-ms` per window. With `--force`, terminates the owning process for any window still alive after its grace period. No matches at all is a no-op success (exit 0) — use this as a cleanup catch-all when the exact hwnd(s) still open at the end of a run aren't reliably known (e.g. some Explorer navigations open extra windows that never get captured into a tracked variable, so closing only the one tracked hwnd can leave others behind). Exit: 0 no matches or all closed, 2 at least one still alive without `--force`, 3 bad usage.
+
+```
+close_windows_matching.py <title_regex> [--backend uia|win32|any] [--grace-ms 2000] [--force]
+```
+
 ### `launch.py` — launch an executable, optionally wait for its window
 Prints `pid`. With `--wait-window`, prints `pid hwnd left top right bottom title` once a matching window appears. Exit: 0 OK, 1 launch failed, 2 wait timed out, 3 bad usage.
 
@@ -157,6 +164,15 @@ Finds a dialog by `title_regex` and clicks `--button` if present. Tolerant: a mi
 ```
 click_in_dialog.py <title_regex> --button NAME [--auto-id A] [--match exact|contains|regex]
                    [--find-backend uia|win32] [--timeout 4.0] [--required]
+```
+
+### `close_pane_if_present.py` — close a nested tool-window pane by title, if present
+Searches the *descendants* of an already-known parent window (e.g. a Visual Studio main window's hwnd) for a nested pane/tool-window control matching `name_regex` (VS tool windows are not separate top-level windows, so `click_in_dialog.py`/`find_window.py`'s `Desktop().windows()` search can't see them). If found, clicks a button inside that pane matching `--button` (default `Close`, matched `--match exact` by default since VS panes expose several similarly-named buttons -- e.g. a "hide" action labeled `Close (Shift+Esc)` -- and only the plain `Close` title-bar button actually dismisses the floating window). Tolerant by default: no matching pane/button within `--timeout-ms` is a no-op (exit 0) unless `--required` (exit 1). Use this once, generically, right after a Visual Studio window is found/activated to dismiss tool windows VS sometimes auto-opens on solution load (e.g. "Live Unit Testing", confirmed live to auto-appear and dock over the editor for some solutions) instead of working around it per test case. Exit 2 on error.
+
+```
+close_pane_if_present.py <hwnd> <name_regex> [--control-type Window|Pane|Custom (repeatable)]
+                         [--button Close] [--match exact|contains|regex]
+                         [--timeout-ms 3000] [--poll-ms 300] [--required]
 ```
 
 ### `find_devenv.py` — locate the Visual Studio `devenv.exe`
@@ -195,7 +211,7 @@ select_combo.py <hwnd> [--auto-id A] [--name N] --item TEXT [--match exact|conta
 ```
 
 ### `read_console.py` — dump a window's UIA text
-Prints a window's text, preferring the `Document` control (the console buffer), falling back to legacy properties then all visible text nodes. Validates console output without OCR.
+Prints a window's text. Tries, in order: (1) a `Document` control's Value/Text pattern (classic console / PowerShell buffer); (2) a `TermControl`-classed `Text` control's `name` (the Windows Terminal-hosted Visual Studio Debug Console — read directly with no keystrokes, since that console closes on **any** keypress once the app exits, so a Ctrl+A/Ctrl+C fallback would close it first); (3) Ctrl+A/Ctrl+C clipboard extraction for other console hosts exposing only a plain Document/Value; (4) all visible text nodes as a last resort. Validates console output without OCR.
 
 ```
 read_console.py <hwnd>
@@ -243,7 +259,7 @@ write_text.py --out PATH [--text STR] [--append]
 ```
 
 ### `assert_file_exists.py` — file existence / content assertions
-Asserts a file exists (or, with `--negate`, does not), optionally checking `--contains` and `--delete`-ing after. Backs the `assert_file` step.
+Asserts a file exists (or, with `--negate`, does not), optionally checking `--contains` and `--delete`-ing after. Backs the `assert_file` step. `--delete` auto-detects a directory and removes it via Windows PowerShell's `Remove-Item -Recurse -Force` (not `shutil.rmtree`) -- this matters for e.g. Visual Studio's Test Explorer, which leaves a reparse-point-flagged `.vs\...\TestStore\<n>` folder after VS closes: `shutil.rmtree` doesn't recognize that reparse tag as a symlink and recurses into it, hitting Access Denied on its inherited-deny children, while `Remove-Item` deletes the reparse point as a single unit without touching its contents; it is always a no-op (exit 0) when the path is already absent, for either kind of target. On a directory `PermissionError` it also does a best-effort Windows `icacls <path> /reset /T /C /Q` as an extra safety net for plain (non-reparse-point) Deny ACEs. Both kinds of delete also retry on other `PermissionError`/`OSError` (`--retries`, default 5; `--retry-ms` apart, default 1000) as a fallback for genuine transient locks (e.g. a background process or OneDrive sync briefly holding a file open).
 
 ```
 assert_file_exists.py <path> [--contains TEXT] [--negate] [--delete]

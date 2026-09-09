@@ -17,7 +17,7 @@ A popup that grabs focus mid-run will break typing-based steps. Re-run, or add a
 ## Execution policy
 If `irm | iex` is blocked, run:
 ```powershell
-powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/william051200/UI-automation/main/install.ps1 | iex"
+powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/william051200/UI-automation/main/ops/install.ps1 | iex"
 ```
 
 ## Legacy pip workflow
@@ -25,5 +25,5 @@ If you prefer not to use `uv`, the toolkit still works with vanilla pip:
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.lock.txt
-.\.venv\Scripts\python.exe run_test.py test_cases\powershell_echo_loop.csv
+.\.venv\Scripts\python.exe run_test.py test_cases\<test-case>.csv
 ```
