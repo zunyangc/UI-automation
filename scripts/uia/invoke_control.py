@@ -24,6 +24,13 @@ def main():
     parser.add_argument("--auto-id", dest="auto_id")
     parser.add_argument("--control-type", dest="control_type")
     parser.add_argument("--match", choices=["exact", "contains", "regex"], default="exact")
+    parser.add_argument(
+        "--action",
+        choices=["invoke", "expand", "collapse"],
+        default="invoke",
+        help="UIA action to perform: invoke (default, click/Invoke pattern), "
+             "expand/collapse (ExpandCollapse pattern, e.g. for split-button dropdowns).",
+    )
     args = parser.parse_args()
 
     app = Application(backend="uia").connect(handle=args.hwnd)
@@ -33,11 +40,19 @@ def main():
         if (matches(info.name, args.name, args.match)
                 and matches(info.automation_id, args.auto_id, args.match)
                 and matches(info.control_type, args.control_type, args.match)):
-            try:
-                control.invoke()
-            except Exception:
-                control.click_input()
-            print(f"invoked\t{info.name}\t{info.automation_id}\t{info.control_type}")
+            if args.action == "expand":
+                control.expand()
+                past_tense = "expanded"
+            elif args.action == "collapse":
+                control.collapse()
+                past_tense = "collapsed"
+            else:
+                try:
+                    control.invoke()
+                except Exception:
+                    control.click_input()
+                past_tense = "invoked"
+            print(f"{past_tense}\t{info.name}\t{info.automation_id}\t{info.control_type}")
             return
 
     print("no match", file=sys.stderr)

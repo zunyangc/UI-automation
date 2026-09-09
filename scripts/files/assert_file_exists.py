@@ -58,6 +58,9 @@ def main():
                    help="Exit 0 only if the file does NOT exist.")
     p.add_argument("--contains", default=None,
                    help="If set, also assert the file contents include this substring.")
+    p.add_argument("--starts-with", dest="starts_with", default=None,
+                   help="If set, also assert the file contents begin with this exact substring "
+                        "(e.g. to prove a directive is on the literal first line).")
     p.add_argument("--retries", type=int, default=5,
                    help="Delete only: retries on PermissionError/OSError (default 5).")
     p.add_argument("--retry-ms", dest="retry_ms", type=int, default=1000,
@@ -102,13 +105,20 @@ def main():
     want_exists = not a.negate
     if exists != want_exists:
         sys.exit(1)
-    if a.contains is not None and exists:
+    if (a.contains is not None or a.starts_with is not None) and exists:
         with open(resolved, "r", encoding="utf-8", errors="replace") as f:
             data = f.read()
-        if a.contains not in data:
+        if a.contains is not None and a.contains not in data:
             print(f"ERROR: file does not contain {a.contains!r}; got {data!r}", file=sys.stderr)
             sys.exit(1)
-        print(f"contains\t{a.contains!r}\tOK")
+        if a.contains is not None:
+            print(f"contains\t{a.contains!r}\tOK")
+        if a.starts_with is not None and not data.startswith(a.starts_with):
+            first_line = data.splitlines()[0] if data else ""
+            print(f"ERROR: file does not start with {a.starts_with!r}; first line={first_line!r}", file=sys.stderr)
+            sys.exit(1)
+        if a.starts_with is not None:
+            print(f"starts_with\t{a.starts_with!r}\tOK")
 
 if __name__ == "__main__":
     try:

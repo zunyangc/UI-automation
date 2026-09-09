@@ -1,0 +1,60 @@
+# CONFIG
+Section,Key,Value
+name,,e2e-8-multi_tfm_scenario
+description,,"Create a multi-targeted (net10.0;net48) .NET console app in Visual Studio, edit Program.cs and the project file, then build and run against each target framework separately, capturing the console output."
+
+# STEPS
+No,step no,Main step,Trigger,script,args,wait_ms,capture,expect_exit,expected_contains,poll_total_ms,poll_interval_ms,screenshot_pass,screenshot_fail,max_iter,Expected
+1,1,Open Visual Studio,Resolve the current user home directory.,scripts/files/print_home.py,,,"{""vars.home"": ""$.cols[0]""}",,,,,,,,
+1,2,,Open Visual Studio.,scripts/window/find_devenv.py,,,"{""vars.devenv"": ""$.cols[0]""}",,,,,,,,
+1,3,,Launch Visual Studio and wait for its main window.,scripts/window/launch.py,"[""{vars.devenv}"", ""--wait-window"", ""^Microsoft Visual Studio( Insiders)?$"", ""--wait-timeout-ms"", ""84000"", ""--poll-ms"", ""500"", ""--backend"", ""uia""]",,"{""vars.vs_pid"": ""$.cols[0]"", ""vars.vs_hwnd"": ""$.cols[1]""}",,,,,,,,Visual Studio main window is open.
+1,4,,Maximize the Visual Studio main window.,scripts/window/maximize_window.py,"[""{vars.vs_hwnd}""]",,,,,,,,,,
+2,5,Click create new project,Find the Create a new project button.,scripts/uia/find_control.py,"[""{vars.vs_hwnd}"", ""--name"", ""Create a new project"", ""--control-type"", ""Button"", ""--match"", ""contains"", ""--timeout-ms"", ""14000"", ""--poll-ms"", ""400""]",,"{""vars.cnp_x"": ""$.rows[1].cols[7]"", ""vars.cnp_y"": ""$.rows[1].cols[8]""}",,,,,,,,
+2,6,,Click Create a new project.,scripts/input/click.py,"[""{vars.cnp_x}"", ""{vars.cnp_y}""]",4500,,,,,,,,,
+3,7,Make sure language filter is set to all language,Set language filter to All languages.,scripts/uia/select_combo.py,"[""{vars.vs_hwnd}"", ""--auto-id"", ""ComboBox_1"", ""--item"", ""All _languages"", ""--match"", ""exact"", ""--timeout-ms"", ""15000"", ""--poll-ms"", ""300""]",500,,,,,,,,,
+4,8,Search for console app and next,Locate the template search box.,scripts/uia/find_control.py,"[""{vars.vs_hwnd}"", ""--control-type"", ""Edit"", ""--name"", ""Search for templates"", ""--match"", ""contains""]",,"{""vars.search_x"": ""$.rows[1].cols[7]"", ""vars.search_y"": ""$.rows[1].cols[8]""}",,,,,,,,
+4,9,,Click into the search box.,scripts/input/click.py,"[""{vars.search_x}"", ""{vars.search_y}""]",300,,,,,,,,,
+4,10,,Search for console app.,scripts/input/type_text.py,"[""Console App""]",1000,,,,,,,,,
+4,11,,Locate the Console App template item.,scripts/uia/find_control.py,"[""{vars.vs_hwnd}"", ""--name"", ""Console App"", ""--control-type"", ""ListItem"", ""--match"", ""contains"", ""--nth"", ""1""]",,"{""vars.tmpl_x"": ""$.rows[1].cols[7]"", ""vars.tmpl_y"": ""$.rows[1].cols[8]""}",,,,,,,,
+4,12,,Select the Console App template.,scripts/input/click.py,"[""{vars.tmpl_x}"", ""{vars.tmpl_y}""]",500,,,,,,,,,
+4,13,,Click Next.,scripts/uia/invoke_control.py,"[""{vars.vs_hwnd}"", ""--name"", ""Next"", ""--control-type"", ""Button""]",1000,,,,,,,,,
+4,14,,Click Next to go to Additional Information.,scripts/uia/invoke_control.py,"[""{vars.vs_hwnd}"", ""--name"", ""Next"", ""--control-type"", ""Button""]",1500,,,,,,,,,
+5,15,Select framework and create,Notice the selected framework version and ensure the latest available version (.NET 10.0) is selected.,scripts/uia/select_combo.py,"[""{vars.vs_hwnd}"", ""--name"", ""_Framework"", ""--item"", "".NET 10.0"", ""--match"", ""contains""]",500,,,,,,,,,
+6,16,Create project,Find the Create button.,scripts/uia/find_control.py,"[""{vars.vs_hwnd}"", ""--name"", ""Create"", ""--control-type"", ""Button"", ""--timeout-ms"", ""14000"", ""--poll-ms"", ""400""]",,"{""vars.create_x"": ""$.rows[1].cols[7]"", ""vars.create_y"": ""$.rows[1].cols[8]""}",,,,,,,,
+6,17,,Click Create to generate the project.,scripts/input/click.py,"[""{vars.create_x}"", ""{vars.create_y}""]",45000,,,,,,,,,Project is created and loaded.
+6,18,,Re-locate the VS window after project creation.,scripts/window/find_window.py,"[""Microsoft Visual Studio"", ""--backend"", ""uia""]",,"{""vars.vs_hwnd"": ""$.cols[1]""}",,,,,,,,
+6,19,,Maximize the VS window after creation.,scripts/window/maximize_window.py,"[""{vars.vs_hwnd}""]",1000,,,,,,,,,
+6,20,,Activate Visual Studio window.,scripts/window/activate_window.py,"[""{vars.vs_hwnd}""]",3000,,,,,,,,,
+7,21,Make sure solution explorer is opened,Open Solution Explorer.,scripts/input/key.py,"[""ctrl+alt+l""]",500,,,,,,,,,
+7,22,,Find the Solution Explorer tab.,scripts/uia/find_control.py,"[""{vars.vs_hwnd}"", ""--name"", ""Solution Explorer"", ""--control-type"", ""TabItem"", ""--match"", ""contains"", ""--timeout-ms"", ""14000"", ""--poll-ms"", ""400""]",,"{""vars.sol_tab_x"": ""$.rows[1].cols[7]"", ""vars.sol_tab_y"": ""$.rows[1].cols[8]""}",,,,,,,,
+7,23,,Click Solution Explorer tab to bring the tree to front.,scripts/input/click.py,"[""{vars.sol_tab_x}"", ""{vars.sol_tab_y}""]",1500,,,,,,,,,
+7,24,,Locate the ConsoleApp project node and capture its name.,scripts/uia/find_control.py,"[""{vars.vs_hwnd}"", ""--name"", ""ConsoleApp"", ""--control-type"", ""TreeItem"", ""--match"", ""contains"", ""--name-exclude"", ""Solution"", ""--visible"", ""--timeout-ms"", ""30000"", ""--poll-ms"", ""400""]",,"{""vars.proj_name"": ""$.rows[1].cols[0]"", ""vars.proj_x"": ""$.rows[1].cols[7]"", ""vars.proj_y"": ""$.rows[1].cols[8]""}",,,,,,,,
+8,25,Write the code at line 1 using System,Write Program.cs with using System; directive to disk.,scripts/files/write_text.py,"[""--out"", ""{vars.home}\\{vars.proj_name}\\{vars.proj_name}\\Program.cs"", ""--text"", ""using System;\n\nConsole.WriteLine(\""Hello, World!\"");\n""]",500,,,,,,,,,
+8,26,,Validate using System; was written as the literal first line of Program.cs.,scripts/files/assert_file_exists.py,"[""{vars.home}\\{vars.proj_name}\\{vars.proj_name}\\Program.cs"", ""--starts-with"", ""using System;""]",,,,,,,,,,using System; is the first line of Program.cs.
+8,27,,Take screenshot of Program.cs write result.,scripts/files/screenshot.py,,,,,,,,"[""{ss}_program_written.png""]","[""{ss}_program_written_FAIL.png""]",,
+9,28,Double click project name in solution explorer,Double-click the project node to open .csproj in the editor.,scripts/input/click.py,"[""{vars.proj_x}"", ""{vars.proj_y}"", ""--double""]",2000,,,,,,,,,
+10,29,Replace the code with multi-target .csproj,Write the multi-target .csproj file to disk.,scripts/files/write_text.py,"[""--out"", ""{vars.home}\\{vars.proj_name}\\{vars.proj_name}\\{vars.proj_name}.csproj"", ""--text"", ""<Project Sdk=\""Microsoft.NET.Sdk\"">\n\n  <PropertyGroup>\n    <OutputType>Exe</OutputType>\n    <TargetFrameworks>net10.0;net48</TargetFrameworks>\n    <ImplicitUsings>disable</ImplicitUsings>\n    <Nullable>enable</Nullable>\n    <LangVersion>latest</LangVersion>\n  </PropertyGroup>\n\n</Project>\n""]",3000,,,,,,,,,VS auto-restores the .csproj change.
+10,30,,Validate the .csproj file actually contains the multi-target TargetFrameworks.,scripts/files/assert_file_exists.py,"[""{vars.home}\\{vars.proj_name}\\{vars.proj_name}\\{vars.proj_name}.csproj"", ""--contains"", ""<TargetFrameworks>net10.0;net48</TargetFrameworks>""]",,,,,,,,,,.csproj contains net10.0;net48 TargetFrameworks.
+10,31,,Take screenshot of .csproj write result.,scripts/files/screenshot.py,,,,,,,,"[""{ss}_csproj_written.png""]","[""{ss}_csproj_written_FAIL.png""]",,
+11,32,Reload the project after the external TargetFrameworks edit,Find the Reload projects warning banner button.,scripts/uia/find_control.py,"[""{vars.vs_hwnd}"", ""--name"", ""Reload projects"", ""--control-type"", ""Button"", ""--match"", ""contains"", ""--timeout-ms"", ""15000"", ""--poll-ms"", ""400""]",,"{""vars.reload_x"": ""$.rows[1].cols[7]"", ""vars.reload_y"": ""$.rows[1].cols[8]""}",,,,,,,,A Reload projects warning banner appears.
+11,33,,Click Reload projects to adopt the new multi-target csproj.,scripts/input/click.py,"[""{vars.reload_x}"", ""{vars.reload_y}""]",5000,,,,,,,,,Project reloads with net10.0;net48 targets.
+12,34,Build solution,Build the solution (builds both net10.0 and net48).,scripts/input/key.py,"[""ctrl+shift+b""]",15000,,,,,,,,,Solution builds for both net10.0 and net48.
+12,35,,Take screenshot of the build result.,scripts/files/screenshot.py,,,,,,,,"[""{ss}_build_result.png""]","[""{ss}_build_result_FAIL.png""]",,
+13,36,Run net10.0,Run without debugging (Ctrl+F5).,scripts/input/key.py,"[""ctrl+f5""]",3000,,,,,,,,,
+13,37,,Dismiss build error dialog if it appears.,scripts/window/click_in_dialog.py,"[""Microsoft Visual Studio"", ""--button"", ""No"", ""--match"", ""exact"", ""--find-backend"", ""win32"", ""--timeout"", ""3""]",1000,,,,,,,,,
+14,38,Console window open - screenshot net10.0,Find the spawned debug console window.,scripts/window/wait_for.py,"[""--mode"", ""window"", ""--timeout-ms"", ""25000"", ""--poll-ms"", ""500"", ""--"", ""Microsoft Visual Studio Debug"", ""--class"", ""CASCADIA_HOSTING_WINDOW_CLASS"", ""--backend"", ""uia""]",,"{""vars.console_hwnd"": ""$.cols[1]""}",,,,,,,,
+14,39,,Validate the run output actually reflects the net10.0 build output path.,scripts/uia/read_console.py,"[""{vars.console_hwnd}""]",,,,\Debug\net10.0\,8000,400,,,,Console output path contains \Debug\net10.0\.
+14,40,,Take screenshot of net10.0 console output.,scripts/files/screenshot.py,,,,,,,,"[""{ss}_net10_console.png""]","[""{ss}_net10_console_FAIL.png""]",,
+15,41,Close console window,Close the console window.,scripts/window/close_window.py,"[""{vars.console_hwnd}"", ""--force""]",2000,,,,,,,,,
+16,42,Select net48 from the Debug Target framework dropdown,Expand the Debug Target split-button dropdown next to the Run button.,scripts/uia/invoke_control.py,"[""{vars.vs_hwnd}"", ""--name"", ""Debug Target"", ""--control-type"", ""SplitButton"", ""--action"", ""expand""]",1000,,,,,,,,,
+16,43,,Locate the Framework submenu entry.,scripts/uia/find_control.py,"[""{vars.vs_hwnd}"", ""--name"", ""Framework ("", ""--control-type"", ""MenuItem"", ""--match"", ""contains"", ""--timeout-ms"", ""8000"", ""--poll-ms"", ""300""]",,"{""vars.fw_x"": ""$.rows[1].cols[7]"", ""vars.fw_y"": ""$.rows[1].cols[8]""}",,,,,,,,
+16,44,,Click the Framework submenu entry to expand it.,scripts/input/click.py,"[""{vars.fw_x}"", ""{vars.fw_y}""]",800,,,,,,,,,
+16,45,,"Locate the net48 framework item; fails the test if net48 is not offered.",scripts/uia/find_control.py,"[""{vars.vs_hwnd}"", ""--name"", ""net48"", ""--control-type"", ""MenuItem"", ""--match"", ""exact"", ""--timeout-ms"", ""8000"", ""--poll-ms"", ""300""]",,"{""vars.net48_x"": ""$.rows[1].cols[7]"", ""vars.net48_y"": ""$.rows[1].cols[8]""}",,,,,,,,net48 is offered as a debug target framework.
+16,46,,Select net48 as the debug target framework.,scripts/input/click.py,"[""{vars.net48_x}"", ""{vars.net48_y}""]",1500,,,,,,,,,
+17,47,Run net48,Run without debugging (Ctrl+F5).,scripts/input/key.py,"[""ctrl+f5""]",3000,,,,,,,,,
+17,48,,Dismiss build error dialog if it appears.,scripts/window/click_in_dialog.py,"[""Microsoft Visual Studio"", ""--button"", ""No"", ""--match"", ""exact"", ""--find-backend"", ""win32"", ""--timeout"", ""3""]",1000,,,,,,,,,
+18,49,Console window open - screenshot net48,Find the spawned debug console window.,scripts/window/wait_for.py,"[""--mode"", ""window"", ""--timeout-ms"", ""25000"", ""--poll-ms"", ""500"", ""--"", ""Microsoft Visual Studio Debug"", ""--class"", ""CASCADIA_HOSTING_WINDOW_CLASS"", ""--backend"", ""uia""]",,"{""vars.console_hwnd"": ""$.cols[1]""}",,,,,,,,
+18,50,,Validate the run output actually reflects the net48 build output path.,scripts/uia/read_console.py,"[""{vars.console_hwnd}""]",,,,\Debug\net48\,8000,400,,,,Console output path contains \Debug\net48\.
+18,51,,Take screenshot of net48 console output.,scripts/files/screenshot.py,,,,,,,,"[""{ss}_net48_console.png""]","[""{ss}_net48_console_FAIL.png""]",,
+19,52,Close console window,Close the console window.,scripts/window/close_window.py,"[""{vars.console_hwnd}"", ""--force""]",1000,,,,,,,,,
+20,53,Close Visual Studio,Close Visual Studio.,scripts/window/close_window.py,"[""{vars.vs_hwnd}"", ""--wait-process-ms"", ""8000"", ""--force""]",,,,,,,,,,
