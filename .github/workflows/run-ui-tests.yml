@@ -40,6 +40,7 @@ on:
           - ALL
           - test_cases/console_app.csv
           - test_cases/dotnet_sdk_version.csv
+          - test_cases/e2e_2_patch_older_sdk_runtimes.csv
           - test_cases/powershell_echo_loop.csv
           - test_cases/razor_breakpoint.csv
           - test_cases/testcase1_console_nu1605.csv
