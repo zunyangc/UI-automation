@@ -46,6 +46,7 @@ on:
           - test_cases/e2e-3-template_test.csv
           - test_cases/e2e-8-multi_tfm_scenario.csv
           - test_cases/e2e-9-dotnet_lut.csv
+          - test_cases/e2e-12-vb_on_dotnet.csv
           - test_cases/e2e-14-fsharp.csv
           - test_cases/e2e-16-lower_version_build.csv
           - test_cases/e2e-17-retarget_version.csv
