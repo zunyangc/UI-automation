@@ -2,7 +2,6 @@
 Section,Key,Value
 name,,e2e_2_patch_older_sdk_runtimes
 description,,"Monthly verification that newer SDKs publish .NET 10, 9, and 8 applications with the expected patched runtimes; required older-runtime feeds must already be configured."
-artifacts,screenshot_dir,screenshots/{name}-{timestamp}
 
 # STEPS
 No,step no,Main step,Trigger,script,args,wait_ms,capture,expect_exit,expected_contains,poll_total_ms,poll_interval_ms,screenshot_pass,screenshot_fail,max_iter,Expected

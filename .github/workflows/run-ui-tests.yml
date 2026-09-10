@@ -42,7 +42,7 @@ on:
           # --- Update here: keep in sync with test_cases/*.csv ---
           # - ALL  # to be supported in the future
           - test_cases/e2e-1-verify_dotnet_info.csv
-          - test_cases/e2e_2_patch_older_sdk_runtimes.csv
+          - test_cases/e2e-2-patch_older_sdk_runtimes.csv
           - test_cases/e2e-3-template_test.csv
           - test_cases/e2e-14-fsharp.csv
           - test_cases/e2e-16-lower_version_build.csv
