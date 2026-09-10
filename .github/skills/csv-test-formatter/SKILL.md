@@ -47,7 +47,7 @@ description,,"<one-line description>"
 No,Main step,Trigger,script,args,wait_ms,capture,expect_exit,expected_contains,poll_total_ms,poll_interval_ms,screenshot_pass,screenshot_fail,Expected
 ```
 
-Do not add an `artifacts,screenshot_dir` row unless the test case needs a custom location — omitting it defaults to the standard `screenshots/{name}-{timestamp}` folder naming.
+Do not add an `artifacts,screenshot_dir` row. Screenshot artifacts always use the default `screenshots/{name}-{timestamp}` folder naming.
 
 ### `# STEPS` columns (exact order, from csv_schema.py)
 
@@ -79,7 +79,7 @@ There are **no `id`, `type`, or `args_mode` columns** — the loader auto-genera
 5b. **Use a `# LOOP` block for unknown-count loops.** When repetition continues *until a condition clears* (e.g. "repeat on each vulnerable package until none remain"), don't guess a count — emit a `# LOOP` / `# END LOOP` block. The `# LOOP` row's `script`/`args` is the condition (loop runs while its exit code == `expect_exit`, default `0`); its `capture` re-reads the current target each pass; `max_iter` caps iterations. Rows up to `# END LOOP` are the body. See `docs/csv-test-format.md` ("Conditional loops").
 6. **Do NOT randomize any values.** Reproducibility requires identical inputs every run — preserve the exact literals the user provides.
 7. **Selectors:** prefer `auto_id` + `name` together in `find_control` args; always pass a captured window hwnd as the control's parent.
-8. Keep only `name`, `description`, and `artifacts` in `# CONFIG` (the simplified CSV config). Do not add `inputs`, `timing`, or `expected_results` blocks.
+8. Keep only `name` and `description` in `# CONFIG`. Do not add `artifacts`, `inputs`, `timing`, or `expected_results` blocks.
 9. **Minimize waits.** Prefer polling assertions (`expected_contains` with `poll_total_ms`/`poll_interval_ms`, or `wait_for`) over long fixed `wait_ms` when there's an observable state to wait on; when a fixed `wait_ms` is needed, use the smallest reliable value plus a small margin — don't pad delays. Keep values identical every run (no randomization).
 10. **Keep paths machine-portable.** Never hardcode user/profile paths (e.g. `C:\Users\<you>`) — resolve home via `scripts/files/print_home.py` → `{vars.home}`, locate VS via `scripts/window/find_devenv.py` → `{vars.devenv}`, use `{timestamp}` for artifact dirs, match window titles by regex, and discover machine-varying values at runtime so the case runs on any PC/user.
 
@@ -89,7 +89,7 @@ There are **no `id`, `type`, or `args_mode` columns** — the loader auto-genera
 2. Read the rough CSV or interpret the Markdown using the rules above. Preserve its prerequisites, actions, expected results, literal values, code blocks, screenshots, hierarchy, and repetition.
 3. Read `scripts/csvfmt/csv_schema.py`, `test_cases/_template.csv`, `docs/csv-test-format.md`, and the relevant scripts under `scripts\`. Do not search for or read existing converted test cases unless the user explicitly names one as a reference.
 4. Map every action to an existing script. Ask instead of inventing a script or schema capability.
-5. Write `# CONFIG` with `name`, `description`, and `artifacts` → `screenshot_dir`.
+5. Write `# CONFIG` with `name` and `description`; rely on the default `screenshots/{name}-{timestamp}` location.
 6. Write `# STEPS` using the exact `STEPS_COLUMNS` order from `csv_schema.py`.
 7. Populate a global sequential `step no` for every executable row, including `# LOOP` conditions and loop bodies.
 8. JSON-encode `args`, `capture`, `screenshot_pass`, and `screenshot_fail`.
