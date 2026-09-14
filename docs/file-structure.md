@@ -81,6 +81,8 @@ The test runner. Given a CSV spec, it:
 - Captures stdout from helper scripts and stores fields in `vars.*` for later steps (see `capture:` clauses).
 - Evaluates assertions (`assert_console_contains`, `expect_exit`, etc.) and polls where requested.
 - Saves screenshots into `artifacts.screenshot_dir`.
+- On a failed assertion, best-effort captures a UI-state (and console, if captured) screenshot and force-closes every window the spec captured into a `*hwnd` var, so a failed run doesn't leave the app orphaned.
+- Always runs `ops/finalize-run.ps1` once the spec finishes -- pass, fail, or an unexpected runner error -- to kill any stray processes (`devenv`, `MSBuild`, `ServiceHub*`, `conhost`/`cmd`, ...) and delete leftover project/artifact folders in `$HOME`, so every run leaves the machine clean for the next one. Pass `--no-cleanup` to skip this (e.g. when debugging a failure's leftover state).
 - Exits **0** on full pass, **1** on a failed assertion, **2** on runner error (bad spec, missing script, etc.).
 
 Pass `-q` / `--quiet` to suppress per-step headers and successful subcommand stdout — useful when running under an LLM to keep token usage down. Failure output, stderr, and the final `RESULT` line are always shown.

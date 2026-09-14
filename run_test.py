@@ -357,30 +357,77 @@ def on_failure_capture(ctx):
             print(f"    ! failed to close {key}={hwnd}: {e}")
 
 
+def run_global_cleanup(run_started_at):
+    """Run `ops/finalize-run.ps1` unconditionally after every spec, pass or
+    fail, so a run never leaves stray processes (devenv, MSBuild,
+    ServiceHub, vshost, notepad, ...) or leftover project folders behind
+    for the next one. This is on top of -- not a replacement for -- the
+    per-failure window screenshots/close in `on_failure_capture` and each
+    spec's own "Clean up" phase, which close only the conhost/cmd/app
+    windows THAT spec captured into `*hwnd` vars.
+
+    `run_started_at` is passed through as `-Since`, which tells the script
+    it's being invoked from this shared/interactive session: it then skips
+    the (otherwise blanket) conhost/cmd kill, since that can't be safely
+    scoped to just this run without risking the caller's own console.
+
+    Best-effort: a cleanup problem must never mask the spec's real
+    pass/fail result, so any error here is logged and swallowed.
+    """
+    script = os.path.join(ROOT, "ops", "finalize-run.ps1")
+    if not os.path.isfile(script):
+        return
+    print("\n--- global post-run cleanup (ops/finalize-run.ps1) ---")
+    try:
+        since_str = run_started_at.astimezone().strftime("%Y-%m-%dT%H:%M:%S")
+        p = subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script,
+             "-Since", since_str],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+        for line in (p.stdout or "").rstrip().splitlines():
+            print(f"    | {line}")
+        if p.stderr:
+            for line in p.stderr.rstrip().splitlines():
+                print(f"    ! {line}")
+    except Exception as e:
+        print(f"    ! global cleanup raised unexpectedly: {e}")
+
+
 def main():
     global QUIET
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("spec")
     ap.add_argument("-q", "--quiet", action="store_true",
                     help="suppress per-step headers and successful stdout echo")
+    ap.add_argument("--no-cleanup", action="store_true",
+                    help="skip the automatic post-run ops/finalize-run.ps1 cleanup "
+                         "(useful when debugging a failure's leftover state)")
     a = ap.parse_args()
     QUIET = a.quiet
+    run_started_at = datetime.datetime.now(datetime.timezone.utc)
     spec = load_spec(a.spec)
     ctx = Ctx(spec)
     print(f"=== {spec.get('name')} ===")
     print(f"screenshot_dir: {ctx.shot_dir}")
     failed = False
-    for step in spec["steps"]:
-        try:
-            exec_step(step, ctx, {})
-        except AssertionError as e:
-            print(f"\n*** STEP FAILED: {step.get('id')}: {e}")
+    try:
+        for step in spec["steps"]:
             try:
-                on_failure_capture(ctx)
-            except Exception as cleanup_err:
-                print(f"    ! on-failure cleanup raised unexpectedly: {cleanup_err}")
-            failed = True
-            break
+                exec_step(step, ctx, {})
+            except AssertionError as e:
+                print(f"\n*** STEP FAILED: {step.get('id')}: {e}")
+                try:
+                    on_failure_capture(ctx)
+                except Exception as cleanup_err:
+                    print(f"    ! on-failure cleanup raised unexpectedly: {cleanup_err}")
+                failed = True
+                break
+    finally:
+        # Always runs -- pass, fail, or an unexpected runner exception --
+        # so a test case never leaves the machine dirty for the next run.
+        if not a.no_cleanup:
+            run_global_cleanup(run_started_at)
     print("\n=== RESULT:", "FAIL" if failed else "PASS", "===")
     sys.exit(1 if failed else 0)
 
