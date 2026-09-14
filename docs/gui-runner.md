@@ -58,7 +58,8 @@ setup above.
   clicking one opens it in the OS default image viewer.
 - **Open Screenshots Folder** opens that directory in Explorer for full
   size viewing. **Refresh** re-scans `results/` in case another app
-  session (or a manual `run.ps1` invocation) added new runs.
+  session added new runs (a manual `run.ps1` invocation outside the GUI
+  doesn't write to `results/` -- only runs started from this app do).
 
 ## Settings tab
 

@@ -38,7 +38,7 @@ def save_run(spec_path, name, started_at, ended_at, exit_code,
     """
     os.makedirs(results_dir, exist_ok=True)
     ts = started_at.strftime("%Y%m%d_%H%M%SZ")
-    filename = f"{ts}_{_safe_filename_part(name)}.json"
+    base = f"{ts}_{_safe_filename_part(name)}"
     record = {
         "spec_path": spec_path,
         "name": name,
@@ -51,8 +51,20 @@ def save_run(spec_path, name, started_at, ended_at, exit_code,
         "stderr_tail": (stderr_text or "")[-TAIL_CHARS:],
         "screenshot_dir": screenshot_dir,
     }
-    out_path = os.path.join(results_dir, filename)
-    with open(out_path, "w", encoding="utf-8") as f:
+    # Two runs of the same case starting within the same second would
+    # otherwise collide on `base` and overwrite each other -- create the
+    # file exclusively and fall back to a numeric suffix on collision.
+    suffix = 0
+    while True:
+        candidate = f"{base}.json" if suffix == 0 else f"{base}-{suffix}.json"
+        out_path = os.path.join(results_dir, candidate)
+        try:
+            fd = os.open(out_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            suffix += 1
+            continue
+        break
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(record, f, ensure_ascii=False, indent=2)
     return out_path
 

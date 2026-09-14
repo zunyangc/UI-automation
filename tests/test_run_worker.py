@@ -107,9 +107,9 @@ class RunWorkerSequentialTests(unittest.TestCase):
         exit_codes = {cases[0].path: 0, cases[1].path: 1, cases[2].path: 2}
 
         def fake_popen(cmd, **kwargs):
-            # cmd ends with [..., rel_spec, "-q"]; rel_spec matches the
-            # basename of one of our fake case paths.
-            rel_spec = cmd[-2]
+            # cmd ends with [..., rel_spec]; rel_spec matches the basename
+            # of one of our fake case paths.
+            rel_spec = cmd[-1]
             code = None
             for tc in cases:
                 if os.path.basename(tc.path) == os.path.basename(rel_spec):

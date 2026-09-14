@@ -55,20 +55,23 @@ class RunRow:
         self.test_case = test_case
         self.var = tk.BooleanVar(value=False)
         self.frame = ttk.Frame(parent)
-        self.check = ttk.Checkbutton(
-            self.frame, variable=self.var,
-            command=lambda: on_toggle(),
-        )
-        self.check.grid(row=0, column=0, sticky="w")
-        # Status sits right after the checkbox (not after the description)
-        # so it stays visible even when a description is very long.
-        self.status_label = ttk.Label(self.frame, text="", width=10, anchor="w")
-        self.status_label.grid(row=0, column=1, sticky="w", padx=(4, 4))
         label_text = test_case.display_name
         if test_case.error:
             label_text += "  [parse error]"
-        self.name_label = ttk.Label(self.frame, text=label_text, width=42, anchor="w")
-        self.name_label.grid(row=0, column=2, sticky="w")
+        # The case name lives on the checkbox itself (not a separate label)
+        # so keyboard/screen-reader users get an accessible name for the
+        # control they're toggling, instead of an unlabeled checkbox next
+        # to an unrelated label.
+        self.check = ttk.Checkbutton(
+            self.frame, text=label_text, variable=self.var, width=42,
+            command=lambda: on_toggle(),
+        )
+        self.check.grid(row=0, column=0, sticky="w")
+        # Status sits right after the checkbox/name (not after the
+        # description) so it stays visible even when a description is very
+        # long.
+        self.status_label = ttk.Label(self.frame, text="", width=10, anchor="w")
+        self.status_label.grid(row=0, column=1, sticky="w", padx=(4, 4))
         desc = test_case.description or test_case.error or ""
         # If the CSV's internal `# CONFIG name` differs from the filename
         # (common in this repo), keep it visible as a prefix so the two are
@@ -80,7 +83,7 @@ class RunRow:
         self.desc_label = ttk.Label(
             self.frame, text=desc, foreground="#555555", width=self.DESC_MAX_CHARS,
         )
-        self.desc_label.grid(row=0, column=3, sticky="w", padx=(8, 0))
+        self.desc_label.grid(row=0, column=2, sticky="w", padx=(8, 0))
         if test_case.error:
             self.check.state(["disabled"])
 
@@ -154,9 +157,13 @@ class RunTab(ttk.Frame):
                 row.frame.pack_forget()
 
     def _select_all(self):
+        # Selects every currently *visible* row and explicitly clears every
+        # hidden one -- otherwise a row selected before a filter change
+        # would stay selected (and get queued by Run All) even though it's
+        # no longer shown.
         for row in self.rows.values():
-            if row.frame.winfo_ismapped() and not row.test_case.error:
-                row.var.set(True)
+            visible = row.frame.winfo_ismapped()
+            row.var.set(visible and not row.test_case.error)
 
     def _select_none(self):
         for row in self.rows.values():
@@ -264,6 +271,12 @@ class ResultsTab(ttk.Frame):
     def refresh(self):
         self._runs = results_store.list_runs()
         self.tree.delete(*self.tree.get_children())
+        # The previously-selected row's detail pane and screenshot links
+        # would otherwise keep pointing at a run/screenshots that may no
+        # longer exist (e.g. after Clear Results/Clear Screenshots).
+        self.detail_text.delete("1.0", "end")
+        for child in self.shots_frame.winfo_children():
+            child.destroy()
         for i, run in enumerate(self._runs):
             status = run.get("status")
             self.tree.insert("", "end", iid=str(i), values=(
@@ -324,9 +337,10 @@ class SettingsTab(ttk.Frame):
 
     _BTN_WIDTH = 18  # same width for all three cleanup buttons
 
-    def __init__(self, parent, on_results_cleared=None):
+    def __init__(self, parent, on_results_cleared=None, on_screenshots_cleared=None):
         super().__init__(parent)
         self.on_results_cleared = on_results_cleared
+        self.on_screenshots_cleared = on_screenshots_cleared
 
         style = ttk.Style(self)
         # Default ttk button look, just with red text, per user request.
@@ -376,18 +390,35 @@ class SettingsTab(ttk.Frame):
 
         Confirms (with a warning dialog), wipes every file/subfolder under
         `directory` (recreating the now-empty directory afterwards so the
-        app keeps working without a restart), then reports success.
+        app keeps working without a restart), then reports success -- or,
+        if any item couldn't be deleted (e.g. locked/in-use file), reports
+        that instead of falsely claiming everything was cleared.
         """
         if not os.path.isdir(directory):
             messagebox.showinfo(title, "No such directory -- nothing to clear.")
             return
         if not self._confirm_irreversible(title, confirm_message):
             return
-        shutil.rmtree(directory, ignore_errors=True)
+        errors = []
+
+        def _on_error(_func, path, exc_info):
+            errors.append(f"{path}: {exc_info[1]}")
+
+        shutil.rmtree(directory, onerror=_on_error)
         os.makedirs(directory, exist_ok=True)
         if on_cleared:
             on_cleared()
-        messagebox.showinfo(title, "Cleared.")
+        if errors:
+            preview = "\n".join(errors[:10])
+            if len(errors) > 10:
+                preview += f"\n...and {len(errors) - 10} more"
+            messagebox.showwarning(
+                title,
+                "Some items could not be deleted (in use or permission "
+                f"denied) and may still remain:\n{preview}",
+            )
+        else:
+            messagebox.showinfo(title, "Cleared.")
 
     def _clear_results(self):
         self._clear_directory(
@@ -400,6 +431,7 @@ class SettingsTab(ttk.Frame):
         self._clear_directory(
             "Clear Screenshots", SCREENSHOTS_DIR,
             f"Delete all screenshots under:\n{SCREENSHOTS_DIR}",
+            on_cleared=self.on_screenshots_cleared,
         )
 
     def _clear_all_repos(self):
@@ -422,11 +454,15 @@ class App(ttk.Frame):
         notebook.pack(fill="both", expand=True)
         self.results_tab = ResultsTab(notebook)
         self.run_tab = RunTab(notebook, self.worker, on_run_started=self._noop)
-        self.settings_tab = SettingsTab(notebook, on_results_cleared=self._on_results_cleared)
+        self.settings_tab = SettingsTab(
+            notebook, on_results_cleared=self._on_results_cleared,
+            on_screenshots_cleared=self.results_tab.refresh,
+        )
         notebook.add(self.run_tab, text="Run")
         notebook.add(self.results_tab, text="Results")
         notebook.add(self.settings_tab, text="Settings")
 
+        root.protocol("WM_DELETE_WINDOW", self.on_close)
         self._poll_events()
 
     def _on_results_cleared(self):
@@ -435,6 +471,17 @@ class App(ttk.Frame):
 
     def _noop(self):
         pass
+
+    def on_close(self):
+        """Make sure closing the window can't leave an orphaned run.ps1
+        process tree behind: cancel anything still queued and forcibly
+        kill the in-flight process (if any) before the app exits. The
+        worker thread is a daemon, so it never gets to run cleanup code on
+        interpreter exit -- this has to happen here instead.
+        """
+        self.worker.stop_queue()
+        self.worker.stop_current()
+        self.root.destroy()
 
     def _poll_events(self):
         try:
