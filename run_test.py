@@ -367,9 +367,15 @@ def run_global_cleanup(run_started_at):
     windows THAT spec captured into `*hwnd` vars.
 
     `run_started_at` is passed through as `-Since`, which tells the script
-    it's being invoked from this shared/interactive session: it then skips
-    the (otherwise blanket) conhost/cmd kill, since that can't be safely
-    scoped to just this run without risking the caller's own console.
+    it's being invoked from this shared/interactive session: it then scopes
+    every kill/delete to resources created/started at or after this run
+    began, so a pre-existing, unrelated IDE/process/project sharing one of
+    the generic names (devenv, MSBuild, ServiceHub*, vshost, notepad,
+    MyGlobal/test/ConsoleApp*/WindowsApp1* folders) is never touched. The
+    one exception is conhost/cmd, which -Since skips entirely (not just
+    time-scopes) -- that can't be safely scoped without risking the
+    caller's own console, so it relies on the captured-window cleanup
+    above / each spec's own "Clean up" steps instead.
 
     Best-effort: a cleanup problem must never mask the spec's real
     pass/fail result, so any error here is logged and swallowed.
@@ -406,12 +412,16 @@ def main():
     a = ap.parse_args()
     QUIET = a.quiet
     run_started_at = datetime.datetime.now(datetime.timezone.utc)
-    spec = load_spec(a.spec)
-    ctx = Ctx(spec)
-    print(f"=== {spec.get('name')} ===")
-    print(f"screenshot_dir: {ctx.shot_dir}")
     failed = False
     try:
+        # Spec loading and Ctx construction (which creates the screenshot
+        # dir) are inside this try so a bad/malformed CSV or a screenshot-
+        # dir setup error still triggers the finally's global cleanup below,
+        # instead of skipping it on the way to the runner-error exit.
+        spec = load_spec(a.spec)
+        ctx = Ctx(spec)
+        print(f"=== {spec.get('name')} ===")
+        print(f"screenshot_dir: {ctx.shot_dir}")
         for step in spec["steps"]:
             try:
                 exec_step(step, ctx, {})
@@ -423,6 +433,20 @@ def main():
                     print(f"    ! on-failure cleanup raised unexpectedly: {cleanup_err}")
                 failed = True
                 break
+            except Exception as e:
+                # Unexpected (non-assertion) error, e.g. a bad `capture`
+                # selector or a helper-script crash. Still run the same
+                # best-effort window screenshot/close as a normal step
+                # failure so captured windows don't leak, then re-raise --
+                # this preserves the documented exit-code-2 "runner error"
+                # path (handled by the __main__ wrapper below); it is not
+                # swallowed into a plain FAIL/exit-1 result.
+                print(f"\n*** STEP RAISED UNEXPECTED ERROR: {step.get('id')}: {e}")
+                try:
+                    on_failure_capture(ctx)
+                except Exception as cleanup_err:
+                    print(f"    ! on-failure cleanup raised unexpectedly: {cleanup_err}")
+                raise
     finally:
         # Always runs -- pass, fail, or an unexpected runner exception --
         # so a test case never leaves the machine dirty for the next run.
