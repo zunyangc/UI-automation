@@ -23,35 +23,33 @@
     unscoped blanket sweep of the whole machine -- appropriate on a
     dedicated, test-only DevBox runner.
 
-    With -Since (see below), this becomes a *stale-cleanup policy* backed by
-    a small persisted manifest, instead of a naive "created after my own
-    -Since" filter: a per-machine, per-user state file
-    ($env:LOCALAPPDATA\ui-automation\cleanup-state.json) remembers the end
-    time of the last cleanup attempt (`lastAttemptAt`) and any specific
-    process/path this script has already tried -- and failed -- to remove
-    (`pendingProcesses` / `pendingPaths`). Each invocation:
-      - Uses the PERSISTED `lastAttemptAt` (not this run's own -Since) as the
-        scope cutoff, so a resource left behind by an EARLIER run -- e.g. one
-        whose own cleanup never got to run at all, because run_test.py's
-        process was killed externally before reaching its `finally` block --
-        is still caught: its timestamp predates *this* run's start but not
-        necessarily the last time cleanup actually executed.
-      - ALSO unconditionally retries anything already recorded in
-        `pendingProcesses`/`pendingPaths` regardless of its timestamp, since
-        those are known-owned resources this script previously targeted and
-        failed to remove (e.g. transient access-denied) -- a resource whose
-        creation time will always predate any cutoff that already failed to
-        catch it once, so time-scoping alone can never self-heal that case.
-      - Advances `lastAttemptAt` to now and persists whatever is still left
-        (kill/delete failures) as the new pending list, so cleanup keeps
-        retrying known offenders on every subsequent invocation until they
-        actually go away, while a genuinely pre-existing, unrelated
-        IDE/process/project that merely shares one of these generic names is
-        never recorded and never touched.
-      - On the very first invocation ever on a machine (no state file yet),
-        bootstraps `lastAttemptAt` to this run's own -Since value, so it
-        does not retroactively sweep long-standing, unrelated state the
-        first time it runs.
+    With -Since (see below), every kill/delete is scoped to resources
+    created/started at or after -Since, PLUS anything already recorded in a
+    small persisted retry manifest (see below). -Since is expected to be
+    the calling run's own start time, or -- when the caller (run_test.py)
+    has detected that a PREVIOUS run crashed before reaching its own
+    cleanup -- that earlier run's own start time instead, so its leftovers
+    are still caught. This script itself does NOT infer "since the last
+    cleanup attempt" on its own: doing that once was tried and reverted,
+    because it also swept up anything a user created independently during
+    idle time between specs (e.g. their own notepad), since that too is
+    "newer than the last attempt". Only a caller with real evidence of a
+    specific unfinished run (run_test.py's active-run marker) may
+    legitimately extend -Since further back than "now" -- and only back to
+    that run's own start, never further.
+
+    Separately, a per-machine, per-user state file
+    ($env:LOCALAPPDATA\ui-automation\cleanup-state.json) persists a retry
+    manifest (`pendingProcesses` / `pendingPaths`): specific processes/paths
+    this script has already tried -- and failed -- to remove (e.g.
+    transient access-denied). Those are retried UNCONDITIONALLY on every
+    subsequent scoped invocation, regardless of -Since, because a resource
+    already known to be test-owned should keep being retried until it's
+    actually gone; a resource's own timestamp will always predate whatever
+    -Since a later invocation is given, so time-scoping alone could never
+    self-heal a stuck removal. Only resources this script itself already
+    targeted are ever recorded here -- nothing is added to the manifest
+    just because it happens to be old.
 
     It NEVER touches the repo working tree, screenshots/, or the running
     GitHub Actions runner process. Safe to invoke at the start AND end of
@@ -59,13 +57,14 @@
 
 .PARAMETER Since
     Optional (a [datetime]). Passing ANY value switches the script into
-    scoped, manifest-backed mode (see above) instead of the legacy unscoped
-    blanket sweep; its actual value is only used to bootstrap the persisted
-    `lastAttemptAt` cutoff the very first time this runs on a machine (when
-    no state file exists yet). Required for safe use from a shared/
-    interactive session (e.g. run_test.py's automatic per-spec cleanup),
-    where an unscoped blanket kill/delete could otherwise take out
-    something the current user was working on.
+    scoped mode (see above) instead of the legacy unscoped blanket sweep.
+    Required for safe use from a shared/interactive session (e.g.
+    run_test.py's automatic per-spec cleanup), where an unscoped blanket
+    kill/delete could otherwise take out something the current user was
+    working on. Pass this run's own start time, unless the caller has
+    concrete evidence of a specific earlier unfinished run, in which case
+    pass that run's own start time instead (never an arbitrary "last
+    cleanup" timestamp -- see .DESCRIPTION).
 
     The one exception is 'conhost'/'cmd': that kill is skipped ENTIRELY in
     scoped mode, because conhost's process ancestry doesn't reliably map to
@@ -96,21 +95,20 @@ $ErrorActionPreference = 'Continue'   # never fail the workflow on cleanup
 Write-Host "==> UI-automation post-run cleanup" -ForegroundColor Cyan
 
 $Scoped = [bool]$Since
+$Cutoff = $Since
 $StatePath = Join-Path $env:LOCALAPPDATA 'ui-automation\cleanup-state.json'
 
-# --- Persisted manifest (scoped mode only) --------------------------------
-# See .DESCRIPTION above. `pendingProcesses`/`pendingPaths` are the
-# ownership/retry manifest: specific resources this script has already
-# targeted (whether via time-scope detection or a prior retry) and failed
-# to remove, kept keyed precisely enough (pid+name+start time; exact path)
-# to avoid ever conflating them with an unrelated resource, e.g. a reused
-# PID.
+
+# --- Persisted retry manifest (scoped mode only) --------------------------
+# `pendingProcesses`/`pendingPaths` are an explicit ownership/retry list:
+# specific resources THIS script has already targeted (because they were in
+# -Since scope on a previous invocation) and failed to remove, kept keyed
+# precisely enough (pid+name+start time; exact path) to avoid ever
+# conflating them with an unrelated resource, e.g. a reused PID. Nothing is
+# ever added here just because it's old -- only things this script itself
+# already tried to clean up.
 function Get-CleanupState {
-    $default = [pscustomobject]@{
-        lastAttemptAt    = $Since
-        pendingProcesses = @()
-        pendingPaths     = @()
-    }
+    $default = [pscustomobject]@{ pendingProcesses = @(); pendingPaths = @() }
     if (-not (Test-Path $StatePath)) { return $default }
     try {
         $raw = Get-Content -Path $StatePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
@@ -118,31 +116,18 @@ function Get-CleanupState {
         Write-Host "    ! cleanup-state.json unreadable/corrupt, bootstrapping fresh: $_"
         return $default
     }
-    $lastAttemptAt = $Since
-    if ($raw.lastAttemptAt) {
-        try {
-            $lastAttemptAt = [datetime]::Parse(
-                $raw.lastAttemptAt, [System.Globalization.CultureInfo]::InvariantCulture,
-                [System.Globalization.DateTimeStyles]::RoundtripKind)
-        } catch { }
-    }
     $pendingProcesses = @()
     if ($raw.pendingProcesses) { $pendingProcesses = @($raw.pendingProcesses) }
     $pendingPaths = @()
     if ($raw.pendingPaths) { $pendingPaths = @($raw.pendingPaths) }
-    return [pscustomobject]@{
-        lastAttemptAt    = $lastAttemptAt
-        pendingProcesses = $pendingProcesses
-        pendingPaths     = $pendingPaths
-    }
+    return [pscustomobject]@{ pendingProcesses = $pendingProcesses; pendingPaths = $pendingPaths }
 }
 
 function Save-CleanupState {
-    param($LastAttemptAt, $PendingProcesses, $PendingPaths)
+    param($PendingProcesses, $PendingPaths)
     $dir = Split-Path -Path $StatePath -Parent
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     $state = [pscustomobject]@{
-        lastAttemptAt    = $LastAttemptAt.ToString('o')
         pendingProcesses = @($PendingProcesses)
         pendingPaths     = @($PendingPaths)
     }
@@ -154,7 +139,6 @@ function Save-CleanupState {
 }
 
 $CleanupState = if ($Scoped) { Get-CleanupState } else { $null }
-$Cutoff = if ($Scoped) { $CleanupState.lastAttemptAt } else { $null }
 $PendingProcessKeys = if ($Scoped) {
     @($CleanupState.pendingProcesses | ForEach-Object { "$($_.pid)|$($_.name)|$($_.startTime)" })
 } else { @() }
@@ -166,10 +150,11 @@ $SurvivingProcesses = @()
 $SurvivingPaths = @()
 
 # A resource is in scope when: legacy unscoped mode (-Since omitted), OR its
-# own timestamp is at/after the persisted cutoff (created/started since the
-# last cleanup attempt -- catches leftovers from a run whose own cleanup
-# never ran), OR it is a already-known pending offender (retried
-# unconditionally regardless of age until it actually goes away).
+# own timestamp is at/after -Since (created/started during -- or, when the
+# caller detected a crashed previous run, since that earlier run's own
+# start -- see .DESCRIPTION), OR it is an already-known pending offender
+# from a PREVIOUS scoped invocation (retried unconditionally regardless of
+# age until it actually goes away).
 function Test-InCleanupScope {
     param($Timestamp, [bool]$IsPending)
     if (-not $Scoped) { return $true }
@@ -309,7 +294,7 @@ foreach ($file in $homeFiles) {
 
 # --- Persist updated manifest (scoped mode only) --------------------------
 if ($Scoped) {
-    Save-CleanupState -LastAttemptAt (Get-Date) -PendingProcesses $SurvivingProcesses -PendingPaths $SurvivingPaths
+    Save-CleanupState -PendingProcesses $SurvivingProcesses -PendingPaths $SurvivingPaths
 }
 
 Write-Host "==> Cleanup complete" -ForegroundColor Green
