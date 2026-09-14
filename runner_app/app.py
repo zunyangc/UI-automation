@@ -115,18 +115,35 @@ class RunTab(ttk.Frame):
         ttk.Button(top, text="Select All", command=self._select_all).pack(side="left", padx=2)
         ttk.Button(top, text="Select None", command=self._select_none).pack(side="left", padx=2)
 
-        # Scrollable list of test-case rows.
+        # Scrollable list of test-case rows -- mouse-wheel driven (like the
+        # log panel / Results tree already are), no visible scrollbar to
+        # drag. Vertical wheel scrolls up/down; Shift+wheel scrolls
+        # sideways for rows wider than the window.
         list_container = ttk.Frame(self)
         list_container.pack(fill="both", expand=True, padx=8)
         canvas = tk.Canvas(list_container, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(list_container, orient="vertical", command=canvas.yview)
         self.list_frame = ttk.Frame(canvas)
         self.list_frame.bind(
             "<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.create_window((0, 0), window=self.list_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
         canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+
+        def _on_vertical_wheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        def _on_horizontal_wheel(event):
+            canvas.xview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        # Only active while the cursor is over the list, so wheel scrolling
+        # elsewhere (e.g. the log panel, other tabs) isn't hijacked.
+        canvas.bind("<Enter>", lambda e: (
+            canvas.bind_all("<MouseWheel>", _on_vertical_wheel),
+            canvas.bind_all("<Shift-MouseWheel>", _on_horizontal_wheel),
+        ))
+        canvas.bind("<Leave>", lambda e: (
+            canvas.unbind_all("<MouseWheel>"),
+            canvas.unbind_all("<Shift-MouseWheel>"),
+        ))
 
         for tc in test_catalog.discover():
             row = RunRow(self.list_frame, tc, self._noop)
@@ -498,7 +515,19 @@ class App(ttk.Frame):
 def main():
     root = tk.Tk()
     root.title("UI-automation Runner")
-    root.geometry("900x700")
+
+    # 900x700 is the preferred default (this repo's earlier GUI size), but
+    # cap it to whatever actually fits on a smaller DevBox display -- with
+    # a usable floor -- instead of opening a window bigger than the screen.
+    screen_w = root.winfo_screenwidth()
+    screen_h = root.winfo_screenheight()
+    width = max(700, min(900, screen_w - 100))
+    height = max(500, min(700, screen_h - 120))
+    x = max(0, (screen_w - width) // 2)
+    y = max(0, (screen_h - height) // 2)
+    root.geometry(f"{width}x{height}+{x}+{y}")
+    root.minsize(700, 500)
+
     App(root)
     root.mainloop()
 
