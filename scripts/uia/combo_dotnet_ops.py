@@ -150,6 +150,14 @@ def _rank(name):
     return (major, minor, lts, preview)
 
 
+def name_to_tfm(name):
+    """Convert a ``.NET <major>.<minor> ...`` combo label to its TFM (e.g. ``net8.0``)."""
+    m = DOTNET_RE.match(name)
+    if not m:
+        return None
+    return f"net{m.group(1)}.{m.group(2)}"
+
+
 def pick_latest(items, prefer_preview):
     """items is a list of (name, elem). Returns (name, elem) or (None, None)."""
     ranked = [(name, elem, _rank(name)) for name, elem in items]
@@ -238,7 +246,10 @@ def cmd_select_latest(args):
         if read_selected(combo) == latest_name:
             break
         time.sleep(0.1)
-    print(latest_name)
+    if args.print_tfm:
+        print(f"{latest_name}\t{name_to_tfm(latest_name) or ''}")
+    else:
+        print(latest_name)
 
 
 def cmd_verify_default_is_latest(args):
@@ -332,13 +343,18 @@ def main():
         sp.add_argument("--kill-pid", dest="kill_pid", type=int, default=None,
                         help="on verification failure, kill this pid before exiting")
 
+    def print_tfm(sp):
+        sp.add_argument("--print-tfm", dest="print_tfm", action="store_true",
+                        help="also print the derived TFM (e.g. net8.0) as a second "
+                             "tab-separated column")
+
     lp = sub.add_parser("list")
     add_common(lp)
     lp.add_argument("--out-file", dest="out_file", default=None,
                     help="if set, also write each item name to this file "
                          "(newline-delimited), for use as an item_queue file")
     add_common(sub.add_parser("latest"), (prefer_preview,))
-    add_common(sub.add_parser("select-latest"), (prefer_preview,))
+    add_common(sub.add_parser("select-latest"), (prefer_preview, print_tfm))
     add_common(sub.add_parser("verify-default-is-latest"), (prefer_preview, kill_pid_arg))
     ve = sub.add_parser("verify-default-equals")
     add_common(ve, (kill_pid_arg,))
