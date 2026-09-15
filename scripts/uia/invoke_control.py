@@ -2,6 +2,7 @@
 import argparse
 import re
 import sys
+import time
 
 from pywinauto import Application
 
@@ -31,29 +32,41 @@ def main():
         help="UIA action to perform: invoke (default, click/Invoke pattern), "
              "expand/collapse (ExpandCollapse pattern, e.g. for split-button dropdowns).",
     )
+    parser.add_argument("--timeout-ms", dest="timeout_ms", type=int, default=0,
+                         help="total time budget to keep retrying while the control "
+                              "is not yet present (default 0: try once).")
+    parser.add_argument("--poll-ms", dest="poll_ms", type=int, default=300,
+                         help="poll interval in ms when --timeout-ms > 0 (default 300).")
     args = parser.parse_args()
 
     app = Application(backend="uia").connect(handle=args.hwnd)
     window = app.window(handle=args.hwnd)
-    for control in window.descendants():
-        info = control.element_info
-        if (matches(info.name, args.name, args.match)
-                and matches(info.automation_id, args.auto_id, args.match)
-                and matches(info.control_type, args.control_type, args.match)):
-            if args.action == "expand":
-                control.expand()
-                past_tense = "expanded"
-            elif args.action == "collapse":
-                control.collapse()
-                past_tense = "collapsed"
-            else:
-                try:
-                    control.invoke()
-                except Exception:
-                    control.click_input()
-                past_tense = "invoked"
-            print(f"{past_tense}\t{info.name}\t{info.automation_id}\t{info.control_type}")
-            return
+
+    deadline = time.time() + args.timeout_ms / 1000.0
+    interval = max(args.poll_ms, 0) / 1000.0
+    while True:
+        for control in window.descendants():
+            info = control.element_info
+            if (matches(info.name, args.name, args.match)
+                    and matches(info.automation_id, args.auto_id, args.match)
+                    and matches(info.control_type, args.control_type, args.match)):
+                if args.action == "expand":
+                    control.expand()
+                    past_tense = "expanded"
+                elif args.action == "collapse":
+                    control.collapse()
+                    past_tense = "collapsed"
+                else:
+                    try:
+                        control.invoke()
+                    except Exception:
+                        control.click_input()
+                    past_tense = "invoked"
+                print(f"{past_tense}\t{info.name}\t{info.automation_id}\t{info.control_type}")
+                return
+        if args.timeout_ms <= 0 or time.time() >= deadline:
+            break
+        time.sleep(interval)
 
     print("no match", file=sys.stderr)
     sys.exit(1)
