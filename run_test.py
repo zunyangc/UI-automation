@@ -8,7 +8,7 @@ Exit codes:
     1  one or more assertions failed
     2  runner error (bad spec, script missing, etc.)
 """
-import argparse, ctypes, datetime, os, re, subprocess, sys, time
+import argparse, ctypes, datetime, json, os, re, subprocess, sys, time
 from ctypes import wintypes
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -372,30 +372,183 @@ def on_failure_capture(ctx):
             print(f"    ! failed to close {key}={hwnd}: {e}")
 
 
+def _active_run_marker_path():
+    """Location of the marker recording that a run is currently in-flight.
+
+    Deliberately outside the repo working tree (so `git clean` can't wipe
+    it), mirroring the existing pattern of keeping the `uv` venv outside
+    the checkout in `.github/workflows/run-ui-tests.yml`.
+    """
+    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    return os.path.join(base, "ui-automation", "active-run-marker.json")
+
+
+def claim_active_run_marker(run_started_at):
+    """Record that a run is starting, and detect a still-pending marker
+    left by a PREVIOUS run that crashed (or was killed) before reaching
+    its own `finally`/cleanup.
+
+    Returns the `-Since` cutoff `run_global_cleanup` should actually use:
+    normally just `run_started_at`, but extended back to a stale marker's
+    own start time when one is found, so that run's genuine leftovers
+    (devenv/MSBuild/project folders it created) are still in scope for
+    THIS run's cleanup to catch -- without ever reaching further back than
+    that specific crashed run's own window. This intentionally does NOT
+    use "time since the last cleanup attempt" as a blanket cutoff (that
+    approach was tried and reverted: it also swept up anything a user
+    created independently during idle time between specs, since that is
+    `newer` than an arbitrary last-attempt marker too). Only a concretely
+    identified unfinished run's own start extends the scope, and only
+    back to exactly that point.
+
+    Assumes specs run one at a time (no supported concurrent invocation of
+    run_test.py), matching the rest of the runner's design.
+    """
+    path = _active_run_marker_path()
+    effective_since = run_started_at
+    try:
+        if os.path.isfile(path):
+            with open(path, "r", encoding="utf-8") as f:
+                marker = json.load(f)
+            prev_started_at = datetime.datetime.fromisoformat(marker["runStartedAt"])
+            if prev_started_at < effective_since:
+                print(f"    ! found stale active-run marker from {prev_started_at.isoformat()} "
+                      f"(a previous run that never reached its own cleanup) -- "
+                      f"extending this run's cleanup scope back to include it")
+                effective_since = prev_started_at
+    except Exception as e:
+        print(f"    ! could not read active-run marker (ignoring): {e}")
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"runStartedAt": run_started_at.isoformat(), "pid": os.getpid()}, f)
+    except Exception as e:
+        print(f"    ! could not write active-run marker: {e}")
+    return effective_since
+
+
+def clear_active_run_marker():
+    """Remove the in-flight marker once this run's cleanup has actually
+    executed, so a normally-completed run never looks "stale" to the next
+    one. Left in place when cleanup is skipped (--no-cleanup), so a LATER
+    real cleanup invocation still recognizes this run's resources as
+    unfinished business and extends its own scope back to cover them.
+    """
+    try:
+        os.remove(_active_run_marker_path())
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print(f"    ! could not clear active-run marker: {e}")
+
+
+def run_global_cleanup(since):
+    """Run `ops/finalize-run.ps1` unconditionally after every spec, pass or
+    fail, so a run never leaves stray processes (devenv, MSBuild,
+    ServiceHub, vshost, notepad, ...) or leftover project folders behind
+    for the next one. This is on top of -- not a replacement for -- the
+    per-failure window screenshots/close in `on_failure_capture` and each
+    spec's own "Clean up" phase, which close only the conhost/cmd/app
+    windows THAT spec captured into `*hwnd` vars.
+
+    `since` is passed through as `-Since`, which tells the script it's
+    being invoked from this shared/interactive session: it then scopes
+    every kill/delete to resources created/started at or after `since`, so
+    a pre-existing, unrelated IDE/process/project sharing one of the
+    generic names (devenv, MSBuild, ServiceHub*, vshost, notepad,
+    MyGlobal/test/ConsoleApp*/WindowsApp1* folders) is never touched.
+    `since` is normally this run's own start time, but
+    `claim_active_run_marker` extends it back to an earlier, still-active
+    marker's start time when a previous run is found to have crashed
+    before reaching its own cleanup -- never further back than that, so
+    idle-time activity between successfully-completed runs is never swept
+    in. The one exception is conhost/cmd, which -Since skips entirely (not
+    just time-scopes) -- that can't be safely scoped without risking the
+    caller's own console, so it relies on the captured-window cleanup
+    above / each spec's own "Clean up" steps instead.
+
+    Best-effort: a cleanup problem must never mask the spec's real
+    pass/fail result, so any error here is logged and swallowed.
+    """
+    script = os.path.join(ROOT, "ops", "finalize-run.ps1")
+    if not os.path.isfile(script):
+        return
+    print("\n--- global post-run cleanup (ops/finalize-run.ps1) ---")
+    try:
+        since_str = since.astimezone().strftime("%Y-%m-%dT%H:%M:%S")
+        p = subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script,
+             "-Since", since_str],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+        for line in (p.stdout or "").rstrip().splitlines():
+            print(f"    | {line}")
+        if p.stderr:
+            for line in p.stderr.rstrip().splitlines():
+                print(f"    ! {line}")
+    except Exception as e:
+        print(f"    ! global cleanup raised unexpectedly: {e}")
+
+
 def main():
     global QUIET
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("spec")
     ap.add_argument("-q", "--quiet", action="store_true",
                     help="suppress per-step headers and successful stdout echo")
+    ap.add_argument("--no-cleanup", action="store_true",
+                    help="skip the automatic post-run ops/finalize-run.ps1 cleanup "
+                         "(useful when debugging a failure's leftover state)")
     a = ap.parse_args()
     QUIET = a.quiet
-    spec = load_spec(a.spec)
-    ctx = Ctx(spec)
-    print(f"=== {spec.get('name')} ===")
-    print(f"screenshot_dir: {ctx.shot_dir}")
+    run_started_at = datetime.datetime.now(datetime.timezone.utc)
+    cleanup_since = run_started_at
+    if not a.no_cleanup:
+        cleanup_since = claim_active_run_marker(run_started_at)
     failed = False
-    for step in spec["steps"]:
-        try:
-            exec_step(step, ctx, {})
-        except AssertionError as e:
-            print(f"\n*** STEP FAILED: {step.get('id')}: {e}")
+    try:
+        # Spec loading and Ctx construction (which creates the screenshot
+        # dir) are inside this try so a bad/malformed CSV or a screenshot-
+        # dir setup error still triggers the finally's global cleanup below,
+        # instead of skipping it on the way to the runner-error exit.
+        spec = load_spec(a.spec)
+        ctx = Ctx(spec)
+        print(f"=== {spec.get('name')} ===")
+        print(f"screenshot_dir: {ctx.shot_dir}")
+        for step in spec["steps"]:
             try:
-                on_failure_capture(ctx)
-            except Exception as cleanup_err:
-                print(f"    ! on-failure cleanup raised unexpectedly: {cleanup_err}")
-            failed = True
-            break
+                exec_step(step, ctx, {})
+            except AssertionError as e:
+                print(f"\n*** STEP FAILED: {step.get('id')}: {e}")
+                try:
+                    on_failure_capture(ctx)
+                except Exception as cleanup_err:
+                    print(f"    ! on-failure cleanup raised unexpectedly: {cleanup_err}")
+                failed = True
+                break
+            except Exception as e:
+                # Unexpected (non-assertion) error, e.g. a bad `capture`
+                # selector or a helper-script crash. Still run the same
+                # best-effort window screenshot/close as a normal step
+                # failure so captured windows don't leak, then re-raise --
+                # this preserves the documented exit-code-2 "runner error"
+                # path (handled by the __main__ wrapper below); it is not
+                # swallowed into a plain FAIL/exit-1 result.
+                print(f"\n*** STEP RAISED UNEXPECTED ERROR: {step.get('id')}: {e}")
+                try:
+                    on_failure_capture(ctx)
+                except Exception as cleanup_err:
+                    print(f"    ! on-failure cleanup raised unexpectedly: {cleanup_err}")
+                raise
+    finally:
+        # Always runs -- pass, fail, or an unexpected runner exception --
+        # so a test case never leaves the machine dirty for the next run.
+        if not a.no_cleanup:
+            run_global_cleanup(cleanup_since)
+            # Cleanup actually executed: this run has no more unfinished
+            # business, so it's safe to stop treating it as a stale/
+            # crashed marker for a future invocation.
+            clear_active_run_marker()
     print("\n=== RESULT:", "FAIL" if failed else "PASS", "===")
     sys.exit(1 if failed else 0)
 

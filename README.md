@@ -37,6 +37,15 @@ Add `-q` (or `--quiet`) to suppress per-step echo and successful subcommand stdo
 
 **On any step failure**, before reporting `RESULT: FAIL`, the runner automatically: screenshots the current UI state, screenshots the console/log window if the CSV captured one (a `capture` var whose name contains `cmd`/`console`, e.g. `vars.cmd_hwnd`), and force-closes every window handle the CSV captured (via `close_window.py --force`) so a failed run doesn't leave apps/consoles orphaned for the next run. Each of these is best-effort and never masks the original failure.
 
+## Run tests from a GUI (in-DevBox runner)
+
+```powershell
+cd $HOME\UI-automation
+.\run_gui.ps1
+```
+
+Launches a local Tkinter app to pick test case(s) (or "Run All"), run them, and browse results/screenshots from a Results tab — an alternative to invoking `run.ps1` by hand or via the GitHub Actions self-hosted-runner model. See [docs/gui-runner.md](docs/gui-runner.md).
+
 ## Author a new scenario
 
 Describe your scenario as plain numbered steps and let an AI agent convert it into a runnable CSV test case — you don't need to know which script implements each action or its arguments:

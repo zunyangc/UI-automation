@@ -27,6 +27,12 @@ def main():
     parser.add_argument("--match", choices=["exact", "contains", "regex"], default="exact")
     parser.add_argument("--optional", action="store_true",
                         help="exit 0 when no matching control exists")
+    parser.add_argument(
+        "--action",
+        choices=["invoke", "expand", "collapse"],
+        default="invoke",
+        help="UIA action to perform",
+    )
     parser.add_argument("--timeout-ms", type=int, default=0,
                         help="retry until matched or this timeout expires")
     parser.add_argument("--poll-ms", type=int, default=300,
@@ -36,21 +42,30 @@ def main():
     app = Application(backend="uia").connect(handle=args.hwnd)
     window = app.window(handle=args.hwnd)
     deadline = time.monotonic() + args.timeout_ms / 1000
+    interval = max(args.poll_ms, 0) / 1000.0
     while True:
         for control in window.descendants():
             info = control.element_info
             if (matches(info.name, args.name, args.match)
                     and matches(info.automation_id, args.auto_id, args.match)
                     and matches(info.control_type, args.control_type, args.match)):
-                try:
-                    control.invoke()
-                except Exception:
-                    control.click_input()
-                print(f"invoked\t{info.name}\t{info.automation_id}\t{info.control_type}")
+                if args.action == "expand":
+                    control.expand()
+                    past_tense = "expanded"
+                elif args.action == "collapse":
+                    control.collapse()
+                    past_tense = "collapsed"
+                else:
+                    try:
+                        control.invoke()
+                    except Exception:
+                        control.click_input()
+                    past_tense = "invoked"
+                print(f"{past_tense}\t{info.name}\t{info.automation_id}\t{info.control_type}")
                 return
         if args.timeout_ms <= 0 or time.monotonic() >= deadline:
             break
-        time.sleep(max(args.poll_ms, 0) / 1000)
+        time.sleep(interval)
 
     if args.optional:
         print("no match; skipping")
