@@ -25,24 +25,23 @@ def main():
     parser.add_argument("--auto-id", dest="auto_id")
     parser.add_argument("--control-type", dest="control_type")
     parser.add_argument("--match", choices=["exact", "contains", "regex"], default="exact")
+    parser.add_argument("--optional", action="store_true",
+                        help="exit 0 when no matching control exists")
     parser.add_argument(
         "--action",
         choices=["invoke", "expand", "collapse"],
         default="invoke",
-        help="UIA action to perform: invoke (default, click/Invoke pattern), "
-             "expand/collapse (ExpandCollapse pattern, e.g. for split-button dropdowns).",
+        help="UIA action to perform",
     )
-    parser.add_argument("--timeout-ms", dest="timeout_ms", type=int, default=0,
-                         help="total time budget to keep retrying while the control "
-                              "is not yet present (default 0: try once).")
-    parser.add_argument("--poll-ms", dest="poll_ms", type=int, default=300,
-                         help="poll interval in ms when --timeout-ms > 0 (default 300).")
+    parser.add_argument("--timeout-ms", type=int, default=0,
+                        help="retry until matched or this timeout expires")
+    parser.add_argument("--poll-ms", type=int, default=300,
+                        help="poll interval when --timeout-ms is set")
     args = parser.parse_args()
 
     app = Application(backend="uia").connect(handle=args.hwnd)
     window = app.window(handle=args.hwnd)
-
-    deadline = time.time() + args.timeout_ms / 1000.0
+    deadline = time.monotonic() + args.timeout_ms / 1000
     interval = max(args.poll_ms, 0) / 1000.0
     while True:
         for control in window.descendants():
@@ -64,10 +63,13 @@ def main():
                     past_tense = "invoked"
                 print(f"{past_tense}\t{info.name}\t{info.automation_id}\t{info.control_type}")
                 return
-        if args.timeout_ms <= 0 or time.time() >= deadline:
+        if args.timeout_ms <= 0 or time.monotonic() >= deadline:
             break
         time.sleep(interval)
 
+    if args.optional:
+        print("no match; skipping")
+        return
     print("no match", file=sys.stderr)
     sys.exit(1)
 

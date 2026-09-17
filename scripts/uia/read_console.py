@@ -1,7 +1,8 @@
 """Dump readable console/debug-console text from a window to stdout.
 
-Supports, in order:
+Supports:
 - PowerShell / classic console windows via UIA Document value/text pattern
+- Visual Studio Debug Console fallback via Ctrl+A / Ctrl+C clipboard extraction
 - Windows Terminal-hosted Visual Studio Debug Console via the "TermControl" text
   control's name (no keystrokes -- this console closes on any keypress once the
   app exits, so Ctrl+A/Ctrl+C would close it before it could be copied)
@@ -117,35 +118,6 @@ def _try_uia_document_text(win):
     return ""
 
 
-def _try_term_control_name_text(win):
-    """Fallback for the Visual Studio Debug Console (Windows Terminal-hosted).
-
-    This console is a CASCADIA_HOSTING_WINDOW_CLASS window whose scrollback text is
-    exposed as the ``name`` of a UIA control with class "TermControl" and control_type
-    "Text" (not "Document", so `_try_uia_document_text` never matches it, and it has no
-    Value/Text pattern). Reading `window_text()` directly needs no keystrokes, which
-    matters here: this console closes on ANY keypress once the app exits ("Press any
-    key to close this window . . ."), so `_try_clipboard_console_read`'s Ctrl+A would
-    close the window before Ctrl+C could copy anything.
-    """
-    try:
-        controls = win.descendants()
-    except Exception:
-        controls = []
-
-    best = ""
-    for ctrl in controls:
-        try:
-            if ctrl.element_info.class_name != "TermControl":
-                continue
-            value = _clean(ctrl.window_text())
-        except Exception:
-            continue
-        if len(value) > len(best):
-            best = value
-    return best
-
-
 def _try_clipboard_console_read(win):
     """Fallback for Visual Studio Debug Console.
 
@@ -228,5 +200,6 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except Exception as e:
-        print(f"ERROR: {e}", file=sys.stderr); sys.exit(1)
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
