@@ -43,6 +43,7 @@ No,1,Main step,Trigger,script,args,wait_ms,capture,expect_exit,expected_contains
 5,35,,Click Create to generate the class library project.,scripts/input/click.py,"[""{vars.create_x}"", ""{vars.create_y}""]",5000,,,,,,,,,"ClassLibrary1 project is created and added to the solution, as a sibling folder to v{vars.major}."
 5,36,,Re-locate the VS window (hwnd/title may change after creation).,scripts/window/find_window.py,"[""v{vars.major}.*Visual Studio"", ""--backend"", ""uia""]",,"{""vars.vs_hwnd"": ""$.cols[1]""}",,,,,,,,
 5,37,,Maximize the VS window.,scripts/window/maximize_window.py,"[""{vars.vs_hwnd}""]",1000,,,,,,,,,
+5,37.1,,"Close the 'Live Unit Testing' tool window if Visual Studio auto-opened it on solution load (observed live elsewhere to sometimes dock over the editor and persist across separate devenv launches on this profile; generic, tolerant no-op if it did not appear).",scripts/uia/close_pane_if_present.py,"[""{vars.vs_hwnd}"", ""^Live Unit Testing$"", ""--timeout-ms"", ""5000""]",300,,,,,,,,,
 5,38,,Assert ClassLibrary1.vbproj exists on disk.,scripts/files/assert_file_exists.py,"[""{vars.home}\\ClassLibrary1\\ClassLibrary1.vbproj""]",,,,,,,,,,ClassLibrary1.vbproj created via the VS wizard.
 5,39,,Screenshot of the solution with both projects.,scripts/files/screenshot.py,,,,,,,,"[""{ss}_classlib_created.png""]",,,
 6,40,Add a project reference from v{vars.major} to ClassLibrary1,Find the v{vars.major} project node in Solution Explorer.,scripts/uia/find_control.py,"[""{vars.vs_hwnd}"", ""--name"", ""v{vars.major}"", ""--control-type"", ""TreeItem"", ""--match"", ""exact"", ""--timeout-ms"", ""10000"", ""--poll-ms"", ""400""]",,"{""vars.c8_node_x"": ""$.rows[1].cols[7]"", ""vars.c8_node_y"": ""$.rows[1].cols[8]""}",,,,,,,,
@@ -117,8 +118,9 @@ No,1,Main step,Trigger,script,args,wait_ms,capture,expect_exit,expected_contains
 10,109,,Save the reverted file.,scripts/input/key.py,"[""ctrl+s""]",500,,,,,,,,,
 10,110,,Screenshot confirming Program.vb is reverted.,scripts/files/screenshot.py,,,,,,,,"[""{ss}_intellisense_reverted.png""]",,,
 11,111,Verify the hover tooltip,Click on the 'Class1' identifier in 'Dim myObject As New ClassLibrary1.Class1' (line 3 of Program.vb) to place the caret there.,scripts/input/click.py,"[""438"", ""170""]",300,,,,,,,,,
-11,112,,Press Ctrl+K (first half of the Edit.QuickInfo chord shortcut).,scripts/input/key.py,"[""ctrl+k""]",150,,,,,,,,,
-11,113,,"Press Ctrl+I to complete the Edit.QuickInfo chord, showing the QuickInfo tooltip at the caret (more reliable under automation than a mouse hover, which was confirmed live in the C# variant to not consistently re-arm VS's tooltip).",scripts/input/key.py,"[""ctrl+i""]",800,,,,,,,,,
+11,112,,"Open the Edit menu via its access key (Alt+E). LIVE-TUNE: replaces the Ctrl+K,Ctrl+I chord -- confirmed live that this VS Insiders keyboard scheme has no command bound to Edit.QuickInfo (status bar reported 'The key combination (Ctrl+K, Ctrl+I) is not a command'), so QuickInfo is instead triggered via Edit > IntelliSense > Quick Info using standard menu access keys.",scripts/input/key.py,"[""alt+e""]",400,,,,,,,,,
+11,112.1,,Open the IntelliSense submenu via its access key (I).,scripts/input/key.py,"[""i""]",400,,,,,,,,,
+11,112.2,,Select Quick Info via its access key (Q).,scripts/input/key.py,"[""q""]",800,,,,,,,,,
 11,114,,Validate the QuickInfo tooltip is showing type/file information.,scripts/uia/find_control.py,"[""{vars.vs_hwnd}"", ""--auto-id"", ""QuickInfoToolTip"", ""--control-type"", ""ToolTip"", ""--timeout-ms"", ""10000"", ""--poll-ms"", ""300""]",,,,Class1,10000,300,,,,
 11,115,,Screenshot of the hover tooltip.,scripts/files/screenshot.py,,,,,,,,"[""{ss}_hover_tooltip.png""]",,,
 11,116,,Move the mouse away to dismiss the tooltip.,scripts/input/move_mouse.py,"[""900"", ""400""]",,,,,,,,,,
