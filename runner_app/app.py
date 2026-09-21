@@ -12,8 +12,10 @@ Three tabs:
   * Settings -- housekeeping (clear results/screenshots) and a link to
                 the repository.
 """
+import datetime
 import os
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -27,6 +29,31 @@ from .run_worker import RunEvent, RunWorker
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESULTS_DIR = os.path.join(REPO_ROOT, "results")
 SCREENSHOTS_DIR = os.path.join(REPO_ROOT, "screenshots")
+# Results are recorded (and stored on disk) in UTC, but testers are in
+# Malaysia/Singapore (UTC+8) -- convert for display in the Results tab only.
+DISPLAY_TZ = datetime.timezone(datetime.timedelta(hours=8))
+
+
+def _format_local(iso_ts):
+    """Convert a stored UTC ISO timestamp to "YYYY-MM-DD HH:MM:SS" in UTC+8."""
+    if not iso_ts:
+        return ""
+    try:
+        dt = datetime.datetime.fromisoformat(iso_ts)
+    except ValueError:
+        return iso_ts[:19].replace("T", " ")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return dt.astimezone(DISPLAY_TZ).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _natural_sort_key(filename):
+    """Sort key that treats runs of digits as numbers, e.g. ss_2 before
+    ss_10, matching the run_test.py's `ss_1, ss_2, ..., ss_10` capture
+    order instead of plain lexicographic ("ss_1, ss_10, ss_11, ss_2...").
+    """
+    return [int(part) if part.isdigit() else part.lower()
+            for part in re.split(r"(\d+)", filename)]
 # Visual Studio's default project location -- most test cases create/build
 # throwaway projects here, so this is the main place leftover clutter piles up.
 REPOS_DIR = os.path.join(os.path.expanduser("~"), "source", "repos")
@@ -42,6 +69,9 @@ STATUS_COLOR = {
     "error": "#e37400",
     "cancelled": "#808080",
 }
+
+# Max width/height (px) for the Results tab's screenshot thumbnails.
+THUMBNAIL_SIZE = 96
 
 
 class RunRow:
@@ -256,7 +286,7 @@ class ResultsTab(ttk.Frame):
         columns = ("name", "started_at", "status", "duration")
         self.tree = ttk.Treeview(self, columns=columns, show="headings", height=10)
         for col, label, width in (
-            ("name", "Test case", 260), ("started_at", "Started (UTC)", 170),
+            ("name", "Test case", 260), ("started_at", "Started (UTC+8)", 170),
             ("status", "Status", 80), ("duration", "Duration (s)", 100),
         ):
             self.tree.heading(col, text=label)
@@ -275,14 +305,32 @@ class ResultsTab(ttk.Frame):
 
         # Screenshots for the selected run are listed as clickable links
         # (filename only) rather than rendered inline -- click one to open
-        # it in the OS default image viewer.
+        # it in the OS default image viewer. The list is mouse-wheel
+        # scrollable (no visible scrollbar, matching the Run tab's list)
+        # since a run can have more screenshots than fit in this pane --
+        # without scrolling, the extra links were simply clipped off.
         shots_container = ttk.Frame(detail)
         detail.add(shots_container, weight=1)
         ttk.Label(shots_container, text="Screenshots:").pack(anchor="w", padx=4, pady=(4, 0))
-        self.shots_frame = ttk.Frame(shots_container)
-        self.shots_frame.pack(anchor="w", fill="both", expand=True, padx=4, pady=4)
+        shots_canvas = tk.Canvas(shots_container, highlightthickness=0)
+        self.shots_frame = ttk.Frame(shots_canvas)
+        self.shots_frame.bind(
+            "<Configure>",
+            lambda e: shots_canvas.configure(scrollregion=shots_canvas.bbox("all")),
+        )
+        shots_canvas.create_window((0, 0), window=self.shots_frame, anchor="nw")
+        shots_canvas.pack(anchor="w", fill="both", expand=True, padx=4, pady=4)
+
+        def _on_shots_wheel(event):
+            shots_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        # Only active while hovering the screenshot list, so it doesn't
+        # steal wheel scrolling from the rest of the Results tab.
+        shots_canvas.bind("<Enter>", lambda e: shots_canvas.bind_all("<MouseWheel>", _on_shots_wheel))
+        shots_canvas.bind("<Leave>", lambda e: shots_canvas.unbind_all("<MouseWheel>"))
 
         self._runs = []
+        self._thumbnails = []
         self.refresh()
 
     def refresh(self):
@@ -294,10 +342,11 @@ class ResultsTab(ttk.Frame):
         self.detail_text.delete("1.0", "end")
         for child in self.shots_frame.winfo_children():
             child.destroy()
+        self._thumbnails = []
         for i, run in enumerate(self._runs):
             status = run.get("status")
             self.tree.insert("", "end", iid=str(i), values=(
-                run.get("name"), run.get("started_at", "")[:19].replace("T", " "),
+                run.get("name"), _format_local(run.get("started_at", "")),
                 status, f"{run.get('duration_seconds', 0):.1f}",
             ), tags=(status,) if status in STATUS_COLOR else ())
 
@@ -322,19 +371,51 @@ class ResultsTab(ttk.Frame):
 
         for child in self.shots_frame.winfo_children():
             child.destroy()
+        # Keep references alive -- Tkinter drops a PhotoImage as soon as
+        # nothing in Python still holds it, even while a Label displays it.
+        self._thumbnails = []
         shot_dir = run.get("screenshot_dir")
         if shot_dir and os.path.isdir(shot_dir):
-            pngs = sorted(f for f in os.listdir(shot_dir) if f.lower().endswith(".png"))
-            for name in pngs:
+            pngs = sorted(
+                (f for f in os.listdir(shot_dir) if f.lower().endswith(".png")),
+                key=_natural_sort_key,
+            )
+            cols = 4
+            for i, name in enumerate(pngs):
                 full_path = os.path.join(shot_dir, name)
-                link = ttk.Label(
-                    self.shots_frame, text=name, foreground="#1a73e8", cursor="hand2",
-                )
-                link.pack(anchor="w")
-                link.bind("<Button-1>", lambda e, p=full_path: self._open_image(p))
+                cell = ttk.Frame(self.shots_frame)
+                cell.grid(row=i // cols, column=i % cols, padx=4, pady=4, sticky="n")
+                thumb = self._make_thumbnail(full_path)
+                if thumb is not None:
+                    self._thumbnails.append(thumb)
+                    widget = tk.Label(cell, image=thumb, cursor="hand2", relief="solid", borderwidth=1)
+                else:
+                    # Fall back to a plain link if the PNG can't be decoded.
+                    widget = ttk.Label(cell, text="(preview unavailable)",
+                                        foreground="#1a73e8", cursor="hand2")
+                widget.pack()
+                widget.bind("<Button-1>", lambda e, p=full_path: self._open_image(p))
+                caption = ttk.Label(cell, text=name, wraplength=THUMBNAIL_SIZE)
+                caption.pack()
+                caption.bind("<Button-1>", lambda e, p=full_path: self._open_image(p))
         else:
             ttk.Label(self.shots_frame, text="(no screenshots for this run)",
                       foreground="#808080").pack(anchor="w")
+
+    @staticmethod
+    def _make_thumbnail(path):
+        """Downscale a PNG to fit THUMBNAIL_SIZE, preserving aspect ratio.
+
+        Uses Tk's built-in PhotoImage (no Pillow dependency) -- subsample()
+        only supports integer factors, which is a close-enough thumbnail
+        for quick triage, not pixel-perfect scaling.
+        """
+        try:
+            img = tk.PhotoImage(file=path)
+        except tk.TclError:
+            return None
+        factor = max(1, max(img.width(), img.height()) // THUMBNAIL_SIZE)
+        return img.subsample(factor, factor) if factor > 1 else img
 
     def _open_image(self, path):
         try:
