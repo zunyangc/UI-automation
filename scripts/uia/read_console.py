@@ -168,6 +168,36 @@ def _visible_text_dump(win):
     return "\n".join(out)
 
 
+def _try_term_control_name_text(win):
+    """Windows Terminal-hosted VS Debug Console fallback (verified live).
+
+    That console's scrollback shows up as the `name` of a `control_type=Text`,
+    `class_name=TermControl` control -- reading it needs no keystrokes, unlike
+    the Ctrl+A/Ctrl+C clipboard fallback below, which would close this console
+    (it closes on any keypress once the app exits). When multiple TermControl
+    text nodes are present, the longest one is the actual scrollback body.
+    """
+    best = ""
+
+    try:
+        controls = win.descendants()
+    except Exception:
+        controls = []
+
+    for ctrl in controls:
+        try:
+            info = ctrl.element_info
+            if info.control_type != "Text" or info.class_name != "TermControl":
+                continue
+            text = _clean(ctrl.window_text())
+        except Exception:
+            continue
+        if len(text) > len(best):
+            best = text
+
+    return best
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("hwnd", type=lambda s: int(s, 0))

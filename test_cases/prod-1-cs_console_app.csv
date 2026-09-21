@@ -6,7 +6,7 @@ description,,"Launch Visual Studio; create a C# Console App via the All-language
 # STEPS
 No,step no,Main step,Trigger,script,args,wait_ms,capture,expect_exit,expected_contains,poll_total_ms,poll_interval_ms,screenshot_pass,screenshot_fail,max_iter,Expected
 1,1,Open Visual Studio,Locate the installed Visual Studio devenv.exe.,scripts/window/find_devenv.py,,,"{""vars.devenv"":""$.cols[0]""}",,,,,,,,Resolves devenv.exe via vswhere/registry/filesystem so the case runs on any machine/edition.
-1,2,,Launch Visual Studio and wait for its main window; stash hwnd in vars.vs_hwnd.,scripts/window/launch.py,"[""{vars.devenv}"",""--wait-window"",""^Microsoft Visual Studio( Insiders)?$"",""--wait-timeout-ms"",""84000"",""--poll-ms"",""500"",""--backend"",""uia""]",,"{""vars.vs_hwnd"":""$.cols[1]""}",,,,,,,,
+1,2,,Launch Visual Studio and wait for its main window; stash hwnd in vars.vs_hwnd.,scripts/window/launch.py,"[""{vars.devenv}"",""--wait-window"",""^Microsoft Visual Studio( Insiders)?( \\(Administrator\\))?$"",""--wait-timeout-ms"",""84000"",""--poll-ms"",""500"",""--backend"",""uia""]",,"{""vars.vs_hwnd"":""$.cols[1]""}",,,,,,,,
 1,3,,Maximize the Visual Studio main window.,scripts/window/maximize_window.py,"[""{vars.vs_hwnd}""]",,,,,,,,,,
 1,4,,Put a literal open-brace on the clipboard.,scripts/files/clipboard.py,"[""write"",""{""]",200,,,,,,,,,
 1,5,,"Read it back into vars.lbrace (the runner's own {placeholder} substitution would otherwise eat literal '{'/'}' pairs later in pasted C# code, so braces are routed through a captured var instead of typed as raw text).",scripts/files/clipboard.py,"[""read""]",,"{""vars.lbrace"":""$.cols[0]""}",,,,,,,,
