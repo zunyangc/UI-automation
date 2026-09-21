@@ -172,8 +172,7 @@ def _try_term_control_name_text(win):
     """Windows Terminal-hosted VS Debug Console fallback (verified live).
 
     That console's scrollback shows up as the `name` of a `control_type=Text`,
-    `class_name=TermControl` control, read here via `window_text()` (the uia
-    wrapper returns the element's Name) -- reading it needs no keystrokes, unlike
+    `class_name=TermControl` control -- reading it needs no keystrokes, unlike
     the Ctrl+A/Ctrl+C clipboard fallback below, which would close this console
     (it closes on any keypress once the app exits). When multiple TermControl
     text nodes are present, the longest one is the actual scrollback body.
