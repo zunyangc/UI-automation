@@ -1,8 +1,11 @@
 """Find the newest MAUI project directory under the default Projects root.
 
-Visual Studio's default location for new C# projects is
+Visual Studio's default location for new C# projects is normally
 ``%USERPROFILE%\\source\\repos``, so this helper searches there by default
-(override with ``--root``). It picks the directory whose ``.csproj`` file
+(override with ``--root``). Some machines/VS installs are instead configured
+(or fall back) to create new projects directly under ``%USERPROFILE%``, so
+as a fallback this also searches the home directory itself when nothing is
+found under the primary root. It picks the directory whose ``.csproj`` file
 was most recently modified and whose name matches ``MauiApp\\d+`` (the
 default auto-suggested MAUI project name).
 
@@ -33,25 +36,37 @@ def main():
                         "project created after the current test iteration started")
     a = p.parse_args()
 
-    root = a.root or os.path.join(os.path.expanduser("~"), "source", "repos")
-    if not os.path.isdir(root):
-        print(f"ERROR: root {root!r} not found", file=sys.stderr); sys.exit(2)
+    home = os.path.expanduser("~")
+    if a.root:
+        roots = [a.root]
+    else:
+        # Primary VS default, with a fallback to the home directory itself
+        # for machines/installs where new projects land directly under
+        # %USERPROFILE% instead of %USERPROFILE%\source\repos.
+        roots = [os.path.join(home, "source", "repos"), home]
 
     candidates = []
-    for entry in os.listdir(root):
-        full = os.path.join(root, entry)
-        if not os.path.isdir(full) or not PROJECT_RE.match(entry):
+    searched = []
+    for root in roots:
+        if not os.path.isdir(root):
             continue
-        csproj = find_csproj(full)
-        if not csproj:
-            continue
-        mt = os.path.getmtime(csproj)
-        if mt < a.newer_than:
-            continue
-        candidates.append((mt, os.path.dirname(csproj)))
+        searched.append(root)
+        for entry in os.listdir(root):
+            full = os.path.join(root, entry)
+            if not os.path.isdir(full) or not PROJECT_RE.match(entry):
+                continue
+            csproj = find_csproj(full)
+            if not csproj:
+                continue
+            mt = os.path.getmtime(csproj)
+            if mt < a.newer_than:
+                continue
+            candidates.append((mt, os.path.dirname(csproj)))
 
+    if not searched:
+        print(f"ERROR: no root found among {roots!r}", file=sys.stderr); sys.exit(2)
     if not candidates:
-        print(f"no MauiApp<N> project with .csproj under {root}", file=sys.stderr)
+        print(f"no MauiApp<N> project with .csproj under {searched!r}", file=sys.stderr)
         sys.exit(1)
     candidates.sort(reverse=True)
     print(candidates[0][1])
