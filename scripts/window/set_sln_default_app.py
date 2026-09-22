@@ -16,6 +16,7 @@ environment fixup, not a test assertion).
 import ctypes
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import time
@@ -27,11 +28,8 @@ except Exception as e:
     print(f"ERROR: pywinauto import failed: {e}", file=sys.stderr)
     sys.exit(0)
 
-user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 PROCESS_TERMINATE = 0x0001
-user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
-user32.GetWindowThreadProcessId.restype = wintypes.DWORD
 kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
 kernel32.OpenProcess.restype = wintypes.HANDLE
 kernel32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
@@ -93,7 +91,8 @@ def pick_vs_and_confirm(dlg):
 
     time.sleep(0.3)
     try:
-        always_btn = dlg.child_window(auto_id="OpenWith_AlwaysButton", control_type="Button")
+        buttons = dlg.descendants(control_type="Button")
+        always_btn = next(b for b in buttons if b.automation_id() == "OpenWith_AlwaysButton")
         always_btn.click_input()
     except Exception as e:
         print(f"    failed to click Always: {e}")
@@ -102,30 +101,43 @@ def pick_vs_and_confirm(dlg):
     return True
 
 
-def close_stray_devenv():
-    """Best-effort: force-close whatever Visual Studio window opened for our
-    disposable probe .sln (it has nothing worth keeping/saving)."""
-    time.sleep(2.0)
+def get_devenv_pids():
+    """Return the set of currently running devenv.exe process ids."""
     try:
-        wins = Desktop(backend="uia").windows()
+        out = subprocess.check_output(
+            ["tasklist", "/FI", "IMAGENAME eq devenv.exe", "/FO", "CSV", "/NH"],
+            text=True, stderr=subprocess.DEVNULL,
+        )
     except Exception:
-        return
-    for w in wins:
-        try:
-            title = w.window_text() or ""
-        except Exception:
+        return set()
+    pids = set()
+    for line in out.splitlines():
+        line = line.strip()
+        if not line or line.upper().startswith("INFO:"):
             continue
-        if "Visual Studio" not in title:
-            continue
+        parts = [p.strip('"') for p in line.split(",")]
+        if len(parts) >= 2:
+            try:
+                pids.add(int(parts[1]))
+            except ValueError:
+                pass
+    return pids
+
+
+def close_stray_devenv(pre_existing_pids):
+    """Best-effort: force-close only the devenv.exe process(es) newly spawned
+    by our disposable probe .sln -- never a devenv.exe that was already
+    running before we opened the probe, so we don't risk killing an unrelated
+    Visual Studio session with unsaved work."""
+    time.sleep(2.0)
+    new_pids = get_devenv_pids() - pre_existing_pids
+    for pid in new_pids:
         try:
-            hwnd = w.handle
-            pid = wintypes.DWORD(0)
-            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-            h = kernel32.OpenProcess(PROCESS_TERMINATE, False, pid.value)
+            h = kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
             if h:
                 kernel32.TerminateProcess(h, 1)
                 kernel32.CloseHandle(h)
-                print(f"    closed stray '{title}' window (pid {pid.value})")
+                print(f"    closed stray devenv.exe opened by probe .sln (pid {pid})")
         except Exception:
             continue
 
@@ -135,6 +147,8 @@ def main():
     tmp_sln = os.path.join(tmpdir, "assoc_probe.sln")
     with open(tmp_sln, "w", encoding="utf-8") as f:
         f.write("")
+
+    pre_existing_pids = get_devenv_pids()
 
     try:
         os.startfile(tmp_sln)  # noqa: S606 -- same as double-clicking in Explorer
@@ -152,7 +166,7 @@ def main():
         else:
             print("Open With dialog appeared but could not be driven to completion")
 
-    close_stray_devenv()
+    close_stray_devenv(pre_existing_pids)
 
     # The just-closed VS process may briefly hold the probe file open; retry
     # a few times before giving up (leftover temp files are harmless either
