@@ -24,6 +24,16 @@ covers:
                              that process (used to close Visual Studio when
                              the sanity check fails).
 
+  ensure-default-is-latest <hwnd>
+                             Like ``verify-default-is-latest``, but self-heals
+                             instead of failing: if the combo's current
+                             default does not match the computed latest label
+                             (e.g. a stale sticky preference from before a
+                             newer SDK was installed), explicitly selects the
+                             latest item so the wizard's remembered default is
+                             refreshed. Still exits 1 if no items are found or
+                             the corrective selection does not stick.
+
   verify-default-equals <hwnd> --expected "<label>"
                              Exit 0 iff the combo's current default label
                              matches ``--expected`` exactly. Same
@@ -274,6 +284,73 @@ def cmd_verify_default_is_latest(args):
         sys.exit(1)
 
 
+def cmd_ensure_default_is_latest(args):
+    """Like ``verify-default-is-latest``, but self-heals a stale default.
+
+    Visual Studio's new-project wizard remembers the last Framework picked
+    for a given template type across sessions. On a machine where an older
+    SDK was once the latest (e.g. an earlier automated/manual run selected
+    ``.NET 9.0`` before ``.NET 10.0`` became available), that sticky
+    preference can keep showing as the default even after the newer SDK and
+    matching workloads are installed -- with no product regression involved.
+    Rather than hard-failing on that stale preference, explicitly select the
+    latest item so the wizard's remembered default is refreshed for this and
+    future runs. Still fails if no ``.NET x.y`` items are found, or if the
+    corrective selection does not stick.
+    """
+    combo = connect_combo(args.hwnd, args.auto_id, args.name)
+    selected = read_selected(combo)
+    items = list_items(combo)
+    latest_name, latest_elem = pick_latest(items, args.prefer_preview)
+    print(f"selected: {selected!r}")
+    print(f"latest:   {latest_name!r}")
+    if not latest_name:
+        try:
+            combo.collapse()
+        except Exception:
+            pass
+        kill_pid(args.kill_pid)
+        print("ERROR: no .NET x.x items found", file=sys.stderr)
+        sys.exit(1)
+    if selected == latest_name:
+        try:
+            combo.collapse()
+        except Exception:
+            pass
+        return
+    print(f"WARNING: default {selected!r} != latest {latest_name!r}; "
+          "selecting latest to refresh the sticky preference", file=sys.stderr)
+    try:
+        latest_elem.select()
+    except Exception:
+        try:
+            combo.select(latest_name)
+        except Exception as e:
+            try:
+                combo.collapse()
+            except Exception:
+                pass
+            kill_pid(args.kill_pid)
+            print(f"ERROR: failed to correct selection to {latest_name!r}: {e}",
+                  file=sys.stderr)
+            sys.exit(1)
+    try:
+        combo.collapse()
+    except Exception:
+        pass
+    now = selected
+    for _ in range(10):
+        now = read_selected(combo)
+        if now == latest_name:
+            break
+        time.sleep(0.1)
+    if now != latest_name:
+        kill_pid(args.kill_pid)
+        print(f"ERROR: selection did not stick; combo shows {now!r} instead of {latest_name!r}",
+              file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_select_by_name(args):
     combo = connect_combo(args.hwnd, args.auto_id, args.name)
     items = list_items(combo)
@@ -356,6 +433,7 @@ def main():
     add_common(sub.add_parser("latest"), (prefer_preview,))
     add_common(sub.add_parser("select-latest"), (prefer_preview, print_tfm))
     add_common(sub.add_parser("verify-default-is-latest"), (prefer_preview, kill_pid_arg))
+    add_common(sub.add_parser("ensure-default-is-latest"), (prefer_preview, kill_pid_arg))
     ve = sub.add_parser("verify-default-equals")
     add_common(ve, (kill_pid_arg,))
     ve.add_argument("--expected", required=True, help="expected default combo label")
@@ -370,6 +448,7 @@ def main():
         "latest": cmd_latest,
         "select-latest": cmd_select_latest,
         "verify-default-is-latest": cmd_verify_default_is_latest,
+        "ensure-default-is-latest": cmd_ensure_default_is_latest,
         "verify-default-equals": cmd_verify_default_equals,
         "select-by-name": cmd_select_by_name,
     }
