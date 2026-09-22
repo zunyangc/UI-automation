@@ -20,20 +20,22 @@ except Exception:
 
 def find_dialog(title_rx, backend, deadline):
     rx = re.compile(title_rx)
+    backends = ["uia", "win32"] if backend == "any" else [backend]
     while True:
-        try:
-            windows = Desktop(backend=backend).windows()
-        except Exception:
-            # A window can close mid-enumeration (e.g. a transient dialog from a
-            # prior step), which raises rather than just skipping that window.
-            # Tolerant by design: retry on the next poll instead of crashing.
-            windows = []
-        for w in windows:
+        for b in backends:
             try:
-                if rx.search(w.window_text() or ""):
-                    return w
+                windows = Desktop(backend=b).windows()
             except Exception:
-                continue
+                # A window can close mid-enumeration (e.g. a transient dialog from a
+                # prior step), which raises rather than just skipping that window.
+                # Tolerant by design: retry on the next poll instead of crashing.
+                windows = []
+            for w in windows:
+                try:
+                    if rx.search(w.window_text() or ""):
+                        return w
+                except Exception:
+                    continue
         if time.time() >= deadline:
             return None
         time.sleep(0.3)
@@ -45,8 +47,10 @@ def main():
     p.add_argument("--button", required=True, help="button name to click")
     p.add_argument("--auto-id", dest="auto_id", default=None)
     p.add_argument("--match", choices=["exact", "contains", "regex"], default="contains")
-    p.add_argument("--find-backend", dest="find_backend", choices=["uia", "win32"], default="win32",
-                   help="backend used to DISCOVER the dialog (win32 reliably sees NuGet dialogs)")
+    p.add_argument("--find-backend", dest="find_backend", choices=["uia", "win32", "any"], default="win32",
+                   help="backend used to DISCOVER the dialog (win32 reliably sees NuGet dialogs; "
+                        "'any' also checks uia, needed for modern flyouts like Explorer's "
+                        "'N Interrupted Actions' panel)")
     p.add_argument("--timeout", type=float, default=4.0,
                    help="seconds to wait for the dialog to appear (default 4)")
     p.add_argument("--required", action="store_true",
