@@ -1,6 +1,6 @@
 """UIA helper for the Visual Studio ``Framework`` ComboBox on the Additional Information page.
 
-The MAUI / template test cases (e.g. ``e2e-3-template-test``, ``e2e-20``)
+The MAUI / template test cases (e.g. ``e2e-003-template_test``, ``e2e-020``)
 need a handful of operations against that combo that no existing script
 covers:
 

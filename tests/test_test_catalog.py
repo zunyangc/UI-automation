@@ -55,13 +55,13 @@ class TestCatalogTests(unittest.TestCase):
         # display_name should reflect the actual file under test_cases/ (so
         # it matches what a tester sees when browsing the folder), even
         # though the CSV's internal CONFIG name is something else.
-        self._write("prod-2-hot_reload.csv", VALID_CSV)
+        self._write("prod-002-hot_reload.csv", VALID_CSV)
         cases = test_catalog.discover(self.tmpdir)
         self.assertEqual(len(cases), 1)
         tc = cases[0]
         self.assertEqual(tc.name, "sample_case")
-        self.assertEqual(tc.file_stem, "prod-2-hot_reload")
-        self.assertEqual(tc.display_name, "prod-2-hot_reload")
+        self.assertEqual(tc.file_stem, "prod-002-hot_reload")
+        self.assertEqual(tc.display_name, "prod-002-hot_reload")
 
     def test_skips_template_file(self):
         self._write("_template.csv", VALID_CSV)

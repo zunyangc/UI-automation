@@ -1,6 +1,6 @@
 # CONFIG
 Section,Key,Value
-name,,e2e-17-retarget_version
+name,,e2e-017-retarget_version
 description,,"Copy three ConsoleApp zip packages from the network share to the Desktop, extract each, retarget its TargetFramework(s) to net10.0 (net10.0;net48 for the multi-targeted app) via Visual Studio, build, run, and validate output."
 
 # STEPS

@@ -1,6 +1,6 @@
 # CONFIG
 Section,Key,Value
-name,,e2e-14
+name,,e2e-014
 description,,"F# console app + two F# class libraries (net latest and .NET Standard 2.0) with project references, build/run validation, an xUnit test project referencing ClassLibrary2, Test Explorer run, and Live Unit Testing."
 
 # STEPS

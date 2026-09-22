@@ -1,6 +1,6 @@
 # CONFIG
 Section,Key,Value
-name,,e2e-12-vb_on_dotnet
+name,,e2e-012-vb_on_dotnet
 description,,VB.NET console app that references two C# class libraries (.NET and .NET Standard 2.0) added to the same solution; builds and runs the solution in Visual Studio and validates console output.
 
 # STEPS

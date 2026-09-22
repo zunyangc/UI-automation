@@ -34,7 +34,7 @@ class TestCase:
 
     @property
     def file_stem(self):
-        """The CSV filename without extension, e.g. `prod-2-hot_reload`."""
+        """The CSV filename without extension, e.g. `prod-002-hot_reload`."""
         return os.path.splitext(os.path.basename(self.path))[0]
 
     @property
