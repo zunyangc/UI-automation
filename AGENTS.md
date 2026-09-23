@@ -48,6 +48,8 @@ When the user pastes back a failing step id + stderr, respond with the **smalles
 
 If the failure proves an existing script lacks the required behavior, use `.github/skills/test-script-developer/SKILL.md`; add or extend one script without changing existing defaults, add its unit test, update only the failed CSV row, then resume `test-case-repair`.
 
+If a late-arriving window/control/build/publish condition (not a real defect) could be the cause, see "Timing vs. real failure" in `.github/skills/test-case-repair/SKILL.md` before raising any timeout/poll value.
+
 ## Running tests and the runner
 
 See the [README](README.md) for install, run, and exit-code semantics. Quick reference:
