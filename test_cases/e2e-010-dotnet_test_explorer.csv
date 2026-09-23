@@ -1,6 +1,6 @@
 # CONFIG,,,,,,,,,,,,,,,
 Section,Key,Value,,,,,,,,,,,,,
-name,,e2e-10-dotnet_test_explorer,,,,,,,,,,,,,
+name,,e2e-010-dotnet_test_explorer,,,,,,,,,,,,,
 description,,"Create a .NET Standard class library plus xUnit, NUnit and MSTest projects in Visual Studio, reference the library from each, then exercise Live Unit Testing and Test Explorer.",,,,,,,,,,,,,
 ,,,,,,,,,,,,,,,
 # STEPS,,,,,,,,,,,,,,,

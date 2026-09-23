@@ -127,7 +127,7 @@ Click **Run workflow** (top-right).
 
 | Input | Meaning | Example |
 |---|---|---|
-| `csv_spec` | Pick one CSV, or `ALL` to run every case sequentially | `test_cases/prod-1-cs_console_app.csv` |
+| `csv_spec` | Pick one CSV, or `ALL` to run every case sequentially | `test_cases/prod-001-cs_console_app.csv` |
 | `target_devbox` | Which DevBox slot to run on | `devbox-1` |
 
 Click **Run workflow**.

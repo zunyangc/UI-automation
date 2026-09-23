@@ -1,6 +1,6 @@
 # CONFIG
 Section,Key,Value
-name,,e2e-20-build_compile_run_NET6_MAUI_app_to_reunion
+name,,e2e-020-build_compile_run_NET6_MAUI_app_to_reunion
 description,,"For each .NET x.x entry offered in the Visual Studio Insiders .NET MAUI App Framework dropdown (latest first), drive the New Project wizard to create a MAUI app, verify the .csproj TargetFrameworks match the chosen framework and the Windows-Machine debug target, build the solution, run it and verify the Hello World window plus five Click me button clicks with the pluralised counter, then close Visual Studio and iterate onto the next framework until every offered .NET x.x has been tested."
 
 # STEPS

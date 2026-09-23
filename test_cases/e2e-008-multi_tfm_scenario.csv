@@ -1,6 +1,6 @@
 # CONFIG
 Section,Key,Value
-name,,e2e-8-multi_tfm_scenario
+name,,e2e-008-multi_tfm_scenario
 description,,"Create a multi-targeted (net10.0;net48) .NET console app in Visual Studio, edit Program.cs and the project file, then build and run against each target framework separately, capturing the console output."
 
 # STEPS
@@ -42,7 +42,7 @@ No,step no,Main step,Trigger,script,args,wait_ms,capture,expect_exit,expected_co
 12,35,,Take screenshot of the build result.,scripts/files/screenshot.py,,,,,,,,"[""{ss}_build_result.png""]","[""{ss}_build_result_FAIL.png""]",,
 13,36,Run net10.0,Run without debugging (Ctrl+F5).,scripts/input/key.py,"[""ctrl+f5""]",3000,,,,,,,,,
 13,37,,Dismiss build error dialog if it appears.,scripts/window/click_in_dialog.py,"[""Microsoft Visual Studio"", ""--button"", ""No"", ""--match"", ""exact"", ""--find-backend"", ""win32"", ""--timeout"", ""3""]",1000,,,,,,,,,
-14,38,Console window open - screenshot net10.0,"Find the spawned debug console window. LIVE-TUNE: some VS builds title this window with the built .exe path (Windows Terminal-hosted, class CASCADIA_HOSTING_WINDOW_CLASS); others (confirmed live) show it as a floating 'Microsoft Visual Studio Debug Console' panel instead. The regex alternation and dropped --class filter match either, same fix as prod-1-cs_console_app.",scripts/window/wait_for.py,"[""--mode"", ""window"", ""--timeout-ms"", ""25000"", ""--poll-ms"", ""500"", ""--"", "".*(\\.exe|Debug Console).*"", ""--backend"", ""any""]",,"{""vars.console_hwnd"": ""$.cols[1]""}",,,,,,,,
+14,38,Console window open - screenshot net10.0,"Find the spawned debug console window. LIVE-TUNE: some VS builds title this window with the built .exe path (Windows Terminal-hosted, class CASCADIA_HOSTING_WINDOW_CLASS); others (confirmed live) show it as a floating 'Microsoft Visual Studio Debug Console' panel instead. The regex alternation and dropped --class filter match either, same fix as prod-001-cs_console_app.",scripts/window/wait_for.py,"[""--mode"", ""window"", ""--timeout-ms"", ""25000"", ""--poll-ms"", ""500"", ""--"", "".*(\\.exe|Debug Console).*"", ""--backend"", ""any""]",,"{""vars.console_hwnd"": ""$.cols[1]""}",,,,,,,,
 14,39,,Validate the run output actually reflects the net10.0 build output path.,scripts/uia/read_console.py,"[""{vars.console_hwnd}""]",,,,\Debug\net10.0\,8000,400,,,,Console output path contains \Debug\net10.0\.
 14,40,,Take screenshot of net10.0 console output.,scripts/files/screenshot.py,,,,,,,,"[""{ss}_net10_console.png""]","[""{ss}_net10_console_FAIL.png""]",,
 15,41,Close console window,Close the console window.,scripts/window/close_window.py,"[""{vars.console_hwnd}"", ""--force""]",2000,,,,,,,,,
@@ -53,7 +53,7 @@ No,step no,Main step,Trigger,script,args,wait_ms,capture,expect_exit,expected_co
 16,46,,Select net48 as the debug target framework.,scripts/input/click.py,"[""{vars.net48_x}"", ""{vars.net48_y}""]",1500,,,,,,,,,
 17,47,Run net48,Run without debugging (Ctrl+F5).,scripts/input/key.py,"[""ctrl+f5""]",3000,,,,,,,,,
 17,48,,Dismiss build error dialog if it appears.,scripts/window/click_in_dialog.py,"[""Microsoft Visual Studio"", ""--button"", ""No"", ""--match"", ""exact"", ""--find-backend"", ""win32"", ""--timeout"", ""3""]",1000,,,,,,,,,
-18,49,Console window open - screenshot net48,"Find the spawned debug console window. LIVE-TUNE: some VS builds title this window with the built .exe path (Windows Terminal-hosted, class CASCADIA_HOSTING_WINDOW_CLASS); others (confirmed live) show it as a floating 'Microsoft Visual Studio Debug Console' panel instead. The regex alternation and dropped --class filter match either, same fix as prod-1-cs_console_app.",scripts/window/wait_for.py,"[""--mode"", ""window"", ""--timeout-ms"", ""25000"", ""--poll-ms"", ""500"", ""--"", "".*(\\.exe|Debug Console).*"", ""--backend"", ""any""]",,"{""vars.console_hwnd"": ""$.cols[1]""}",,,,,,,,
+18,49,Console window open - screenshot net48,"Find the spawned debug console window. LIVE-TUNE: some VS builds title this window with the built .exe path (Windows Terminal-hosted, class CASCADIA_HOSTING_WINDOW_CLASS); others (confirmed live) show it as a floating 'Microsoft Visual Studio Debug Console' panel instead. The regex alternation and dropped --class filter match either, same fix as prod-001-cs_console_app.",scripts/window/wait_for.py,"[""--mode"", ""window"", ""--timeout-ms"", ""25000"", ""--poll-ms"", ""500"", ""--"", "".*(\\.exe|Debug Console).*"", ""--backend"", ""any""]",,"{""vars.console_hwnd"": ""$.cols[1]""}",,,,,,,,
 18,50,,Validate the run output actually reflects the net48 build output path.,scripts/uia/read_console.py,"[""{vars.console_hwnd}""]",,,,\Debug\net48\,8000,400,,,,Console output path contains \Debug\net48\.
 18,51,,Take screenshot of net48 console output.,scripts/files/screenshot.py,,,,,,,,"[""{ss}_net48_console.png""]","[""{ss}_net48_console_FAIL.png""]",,
 19,52,Close console window,Close the console window.,scripts/window/close_window.py,"[""{vars.console_hwnd}"", ""--force""]",1000,,,,,,,,,
