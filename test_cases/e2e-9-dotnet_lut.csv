@@ -7,7 +7,7 @@ description,,"Create a C# Class Library (.NET Standard 2.0) with an Add(x,y) met
 No,step no,Main step,Trigger,script,args,wait_ms,capture,expect_exit,expected_contains,poll_total_ms,poll_interval_ms,screenshot_pass,screenshot_fail,max_iter,Expected
 1,1,Open visual studio,Locate the Visual Studio devenv.exe path.,scripts/window/find_devenv.py,[],,"{""vars.devenv"": ""$.cols[0]""}",,,,,,,,
 1,2,,Get the current user's home directory for portable paths.,scripts/files/print_home.py,[],,"{""vars.home"": ""$.cols[0]""}",,,,,,,,
-1,3,,Launch Visual Studio and wait for its window.,scripts/window/launch.py,"[""{vars.devenv}"", ""--wait-window"", ""Microsoft Visual Studio( Insiders)?$"", ""--backend"", ""uia"", ""--wait-timeout-ms"", ""120000"", ""--poll-ms"", ""500""]",1000,"{""vars.vs_hwnd"": ""$.cols[1]""}",,,,,,,,
+1,3,,Launch Visual Studio and wait for its window.,scripts/window/launch.py,"[""{vars.devenv}"", ""--wait-window"", ""Microsoft Visual Studio( Insiders)?( \\(Administrator\\))?$"", ""--backend"", ""uia"", ""--wait-timeout-ms"", ""120000"", ""--poll-ms"", ""500""]",1000,"{""vars.vs_hwnd"": ""$.cols[1]""}",,,,,,,,
 1,4,,Maximize the Visual Studio window.,scripts/window/maximize_window.py,"[""{vars.vs_hwnd}""]",500,,,,,,,,,
 2,5,Click create new project,Locate the 'Create a new project' button on the Start Window.,scripts/uia/find_control.py,"[""{vars.vs_hwnd}"", ""--name"", ""Create a new project"", ""--control-type"", ""Button"", ""--match"", ""exact"", ""--visible"", ""--timeout-ms"", ""30000"", ""--poll-ms"", ""500""]",,"{""vars.cnp_x"": ""$.rows[1].cols[7]"", ""vars.cnp_y"": ""$.rows[1].cols[8]""}",,,,,,,,
 2,6,,Click 'Create a new project'.,scripts/input/click.py,"[""{vars.cnp_x}"", ""{vars.cnp_y}""]",1500,,,,,,,,,
