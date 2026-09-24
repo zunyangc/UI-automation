@@ -138,17 +138,18 @@ def script_path(script):
 
 def run_cmd(script, args, expect_exit=0):
     cmd = [PY, script_path(script)] + [str(a) for a in args]
-    if not QUIET:
-        print(f"  $ {' '.join(cmd)}")
     p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     failed = p.returncode != expect_exit
-    if p.stdout and (failed or not QUIET):
-        for line in p.stdout.rstrip().splitlines():
-            print(f"    | {line}")
-    if p.stderr:
-        for line in p.stderr.rstrip().splitlines():
-            print(f"    ! {line}")
+    # Keep the happy path quiet -- only surface the command + its output
+    # once something has actually gone wrong.
     if failed:
+        print(f"  $ {' '.join(cmd)}")
+        if p.stdout:
+            for line in p.stdout.rstrip().splitlines():
+                print(f"    | {line}")
+        if p.stderr:
+            for line in p.stderr.rstrip().splitlines():
+                print(f"    ! {line}")
         raise AssertionError(f"exit {p.returncode}, expected {expect_exit}")
     return p
 
@@ -473,7 +474,7 @@ def run_global_cleanup(since):
     script = os.path.join(ROOT, "ops", "finalize-run.ps1")
     if not os.path.isfile(script):
         return
-    print("\n--- global post-run cleanup (ops/finalize-run.ps1) ---")
+    print("\nCleaning up...")
     try:
         since_str = since.astimezone().strftime("%Y-%m-%dT%H:%M:%S")
         p = subprocess.run(
@@ -481,13 +482,21 @@ def run_global_cleanup(since):
              "-Since", since_str],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
-        for line in (p.stdout or "").rstrip().splitlines():
-            print(f"    | {line}")
-        if p.stderr:
-            for line in p.stderr.rstrip().splitlines():
-                print(f"    ! {line}")
+        # finalize-run.ps1's own convention: a line starting with "!" is a
+        # warning/failure (e.g. "still running, will retry next cleanup");
+        # everything else is routine progress. Only surface those (plus
+        # stderr) so a clean run just gets a one-line confirmation.
+        problems = [l.strip() for l in (p.stdout or "").rstrip().splitlines()
+                    if l.strip().startswith("!")]
+        problems += (p.stderr or "").rstrip().splitlines()
+        if problems:
+            print("    ! clean up reported problems:")
+            for line in problems:
+                print(f"    ! {line.lstrip('!').strip()}")
+        else:
+            print("    clean up complete.")
     except Exception as e:
-        print(f"    ! global cleanup raised unexpectedly: {e}")
+        print(f"    ! clean up failed: {e}")
 
 
 def main():
@@ -495,7 +504,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("spec")
     ap.add_argument("-q", "--quiet", action="store_true",
-                    help="suppress per-step headers and successful stdout echo")
+                    help="suppress per-step headers")
     ap.add_argument("--no-cleanup", action="store_true",
                     help="skip the automatic post-run ops/finalize-run.ps1 cleanup "
                          "(useful when debugging a failure's leftover state)")
