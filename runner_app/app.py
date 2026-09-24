@@ -287,6 +287,19 @@ class ResultsTab(ttk.Frame):
         ttk.Button(top, text="Refresh", command=self.refresh).pack(side="left")
         ttk.Button(top, text="Open Screenshots Folder", command=self._open_screenshots).pack(side="left", padx=4)
 
+        # "Fail" covers fail/error outcomes only -- "Cancelled" (a stopped
+        # run, not a real failure) gets its own option instead of being
+        # lumped in.
+        ttk.Label(top, text="Filter:").pack(side="left", padx=(12, 2))
+        self.filter_var = tk.StringVar(value="All")
+        self.filter_combo = ttk.Combobox(
+            top, textvariable=self.filter_var,
+            values=("All", "Pass", "Fail", "Cancelled"),
+            state="readonly", width=10,
+        )
+        self.filter_combo.pack(side="left")
+        self.filter_combo.bind("<<ComboboxSelected>>", lambda e: self._render_tree())
+
         columns = ("name", "started_at", "status", "duration")
         self.tree = ttk.Treeview(self, columns=columns, show="headings", height=10)
         for col, label, width in (
@@ -339,16 +352,27 @@ class ResultsTab(ttk.Frame):
 
     def refresh(self):
         self._runs = results_store.list_runs()
+        self._render_tree()
+
+    def _render_tree(self):
         self.tree.delete(*self.tree.get_children())
         # The previously-selected row's detail pane and screenshot links
         # would otherwise keep pointing at a run/screenshots that may no
-        # longer exist (e.g. after Clear Results/Clear Screenshots).
+        # longer exist (e.g. after Clear Results/Clear Screenshots, or now
+        # after switching the status filter to something that excludes it).
         self.detail_text.delete("1.0", "end")
         for child in self.shots_frame.winfo_children():
             child.destroy()
         self._thumbnails = []
+        filt = self.filter_var.get()
         for i, run in enumerate(self._runs):
             status = run.get("status")
+            if filt == "Pass" and status != "pass":
+                continue
+            if filt == "Fail" and status not in ("fail", "error"):
+                continue
+            if filt == "Cancelled" and status != "cancelled":
+                continue
             self.tree.insert("", "end", iid=str(i), values=(
                 run.get("name"), _format_local(run.get("started_at", "")),
                 status, f"{run.get('duration_seconds', 0):.1f}",
