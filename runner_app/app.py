@@ -184,6 +184,7 @@ class RunTab(ttk.Frame):
         btns.pack(fill="x", padx=8, pady=4)
         ttk.Button(btns, text="Run Selected", command=self._run_selected).pack(side="left", padx=2)
         ttk.Button(btns, text="Run All", command=self._run_all).pack(side="left", padx=2)
+        ttk.Button(btns, text="Run Failed", command=self._run_failed).pack(side="left", padx=2)
         ttk.Button(btns, text="Stop Current Run", command=self._stop_current).pack(side="left", padx=2)
         ttk.Button(btns, text="Stop Queue", command=self._stop_queue).pack(side="left", padx=2)
         ttk.Button(btns, text="Stop All", command=self._stop_all).pack(side="left", padx=2)
@@ -231,6 +232,29 @@ class RunTab(ttk.Frame):
 
     def _run_all(self):
         self._select_all()
+        self._run_selected()
+
+    def _failed_case_paths(self):
+        """Absolute paths of every test case whose most recent recorded run
+        was a real failure (`fail`/`error` -- not `cancelled`, which means
+        the tester stopped it, not that the case broke).
+        """
+        latest_status = {}
+        for run in results_store.list_runs():  # newest first
+            spec_path = run.get("spec_path")
+            if spec_path and spec_path not in latest_status:
+                latest_status[spec_path] = run.get("status")
+        return {
+            tc.path for tc in (row.test_case for row in self.rows.values())
+            if latest_status.get(tc.rel_path) in ("fail", "error")
+        }
+
+    def _run_failed(self):
+        failed_paths = self._failed_case_paths()
+        if not failed_paths:
+            return
+        for path, row in self.rows.items():
+            row.var.set(path in failed_paths)
         self._run_selected()
 
     def _stop_queue(self):
