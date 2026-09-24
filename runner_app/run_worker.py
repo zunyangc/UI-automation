@@ -89,6 +89,14 @@ class RunWorker:
         for path, tc in cancelled:
             self.events.put(RunEvent(RunEvent.CANCELLED, path, name=tc.display_name))
 
+    def stop_all(self):
+        """Cancel everything: every not-yet-started spec plus, if one is
+        in-flight, the currently-running process. Combines `stop_queue()`
+        and `stop_current()` into a single call for a "Stop All" action.
+        """
+        self.stop_queue()
+        self.stop_current()
+
     def stop_current(self):
         """Forcibly terminate the currently-running test case, if any.
 

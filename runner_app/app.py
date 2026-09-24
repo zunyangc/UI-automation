@@ -186,6 +186,7 @@ class RunTab(ttk.Frame):
         ttk.Button(btns, text="Run All", command=self._run_all).pack(side="left", padx=2)
         ttk.Button(btns, text="Stop Current Run", command=self._stop_current).pack(side="left", padx=2)
         ttk.Button(btns, text="Stop Queue", command=self._stop_queue).pack(side="left", padx=2)
+        ttk.Button(btns, text="Stop All", command=self._stop_all).pack(side="left", padx=2)
 
         ttk.Label(self, text="Log (currently running case):").pack(anchor="w", padx=8)
         self.log_text = tk.Text(self, height=10, state="disabled", wrap="none")
@@ -237,6 +238,9 @@ class RunTab(ttk.Frame):
 
     def _stop_current(self):
         self.worker.stop_current()
+
+    def _stop_all(self):
+        self.worker.stop_all()
 
     def _append_log(self, text):
         self.log_text.configure(state="normal")
@@ -577,8 +581,7 @@ class App(ttk.Frame):
         worker thread is a daemon, so it never gets to run cleanup code on
         interpreter exit -- this has to happen here instead.
         """
-        self.worker.stop_queue()
-        self.worker.stop_current()
+        self.worker.stop_all()
         self.root.destroy()
 
     def _poll_events(self):
