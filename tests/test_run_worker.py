@@ -1,5 +1,6 @@
 """Tests for runner_app.run_worker: sequential ordering, exit-code -> status
-mapping, and Stop Queue cancelling only not-yet-started items.
+mapping, and Stop Queue / Stop Current / Stop All cancelling the expected
+items.
 
 `subprocess.Popen` is mocked throughout -- these tests never invoke a real
 `run.ps1`/PowerShell process.
@@ -202,6 +203,101 @@ class RunWorkerSequentialTests(unittest.TestCase):
         killed_cmd = mock_run.call_args[0][0]
         self.assertIn("taskkill", killed_cmd)
         self.assertIn("4242", [str(a) for a in killed_cmd])
+
+    def test_stop_all_cancels_queue_and_kills_current(self):
+        cases = [
+            FakeTestCase(os.path.join(self.tmpdir, f"c{i}.csv"), f"case{i}")
+            for i in range(3)
+        ]
+        block_event = threading.Event()
+        fake_popen = make_blocking_stdout_popen(exit_code=0, block_event=block_event)
+
+        with patch("runner_app.run_worker.subprocess.Popen", side_effect=fake_popen), \
+                patch("runner_app.run_worker.subprocess.run") as mock_run:
+            # Simulate taskkill actually terminating the in-flight process:
+            # unblock its stdout iteration so the worker thread can proceed.
+            mock_run.side_effect = lambda *a, **k: block_event.set()
+
+            worker = RunWorker(repo_root=self.tmpdir, results_dir=os.path.join(self.tmpdir, "results"))
+            worker.enqueue(cases)
+
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                event = worker.events.get(timeout=0.2)
+                if event.kind == RunEvent.RUNNING:
+                    break
+
+            worker.stop_all()
+
+            cancelled = []
+            done = []
+            deadline = time.time() + 5
+            while time.time() < deadline and len(done) < 1:
+                event = worker.events.get(timeout=0.2)
+                if event.kind == RunEvent.CANCELLED:
+                    cancelled.append(event)
+                elif event.kind == RunEvent.DONE:
+                    done.append(event)
+
+        self.assertEqual({e.data["name"] for e in cancelled}, {"case1", "case2"})
+        self.assertEqual(len(done), 1)
+        self.assertEqual(done[0].data["name"], "case0")
+        self.assertEqual(done[0].data["status"], "cancelled")
+        mock_run.assert_called_once()
+
+    def test_stop_all_race_between_dequeue_and_launch_still_cancels(self):
+        """Regression test for the stop_all() race flagged in review: a
+        spec could be popped off `_pending` (so stop_queue() no longer
+        sees it) before `_current_spec` was recorded (so stop_current()
+        saw nothing to stop either), letting it start running right after
+        "Stop All" was pressed. `_run_loop()` now sets `_current_spec` in
+        the *same* lock acquisition as the `_pending.pop()`, so by the time
+        `_run_one()` is entered (paused here, before Popen() is called)
+        `_current_spec` is already set and `stop_current()` reliably finds
+        it -- via `_stop_before_launch_spec` since Popen() hasn't run yet.
+        """
+        case = FakeTestCase(os.path.join(self.tmpdir, "c0.csv"), "case0")
+        entered_run_one = threading.Event()
+        allow_run_one = threading.Event()
+        fake_popen = make_fake_popen(exit_code=0, stdout_lines=("ok\n",))
+
+        with patch("runner_app.run_worker.subprocess.Popen", side_effect=fake_popen), \
+                patch("runner_app.run_worker.subprocess.run") as mock_run:
+            worker = RunWorker(repo_root=self.tmpdir, results_dir=os.path.join(self.tmpdir, "results"))
+            real_run_one = worker._run_one
+
+            def wrapped_run_one(tc):
+                # Simulate the window between the atomic pending->current
+                # transition and Popen() actually being called.
+                entered_run_one.set()
+                allow_run_one.wait(timeout=5)
+                return real_run_one(tc)
+
+            worker._run_one = wrapped_run_one
+            worker.enqueue([case])
+
+            self.assertTrue(entered_run_one.wait(timeout=5), "expected _run_one to be entered")
+            # Fire "Stop All" (as two separate calls, exactly like
+            # RunWorker.stop_all()) while the spec is past `_pending` but
+            # its process hasn't launched yet.
+            worker.stop_queue()
+            worker.stop_current()
+            allow_run_one.set()
+
+            done = None
+            cancelled = []
+            deadline = time.time() + 5
+            while time.time() < deadline and done is None:
+                event = worker.events.get(timeout=0.2)
+                if event.kind == RunEvent.DONE:
+                    done = event
+                elif event.kind == RunEvent.CANCELLED:
+                    cancelled.append(event)
+
+        self.assertIsNotNone(done, "expected the spec to still finish (as cancelled), not hang")
+        self.assertEqual(done.data["status"], "cancelled")
+        self.assertEqual(cancelled, [])  # already out of `_pending`, so no separate CANCELLED event
+        mock_run.assert_called_once()  # taskkill was invoked to stop the just-launched process
 
     def test_stop_current_is_noop_when_nothing_running(self):
         worker = RunWorker(repo_root=self.tmpdir, results_dir=os.path.join(self.tmpdir, "results"))

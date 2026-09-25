@@ -21,7 +21,7 @@ import subprocess
 import sys
 import tkinter as tk
 import webbrowser
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 
 from . import results_store, test_catalog
 from .run_worker import RunEvent, RunWorker
@@ -184,8 +184,10 @@ class RunTab(ttk.Frame):
         btns.pack(fill="x", padx=8, pady=4)
         ttk.Button(btns, text="Run Selected", command=self._run_selected).pack(side="left", padx=2)
         ttk.Button(btns, text="Run All", command=self._run_all).pack(side="left", padx=2)
+        ttk.Button(btns, text="Run Failed", command=self._run_failed).pack(side="left", padx=2)
         ttk.Button(btns, text="Stop Current Run", command=self._stop_current).pack(side="left", padx=2)
         ttk.Button(btns, text="Stop Queue", command=self._stop_queue).pack(side="left", padx=2)
+        ttk.Button(btns, text="Stop All", command=self._stop_all).pack(side="left", padx=2)
 
         ttk.Label(self, text="Log (currently running case):").pack(anchor="w", padx=8)
         self.log_text = tk.Text(self, height=10, state="disabled", wrap="none")
@@ -232,11 +234,37 @@ class RunTab(ttk.Frame):
         self._select_all()
         self._run_selected()
 
+    def _failed_case_paths(self):
+        """Absolute paths of every test case whose most recent recorded run
+        was a real failure (`fail`/`error` -- not `cancelled`, which means
+        the tester stopped it, not that the case broke).
+        """
+        latest_status = {}
+        for run in results_store.list_runs():  # newest first
+            spec_path = run.get("spec_path")
+            if spec_path and spec_path not in latest_status:
+                latest_status[spec_path] = run.get("status")
+        return {
+            tc.path for tc in (row.test_case for row in self.rows.values())
+            if latest_status.get(tc.rel_path) in ("fail", "error")
+        }
+
+    def _run_failed(self):
+        failed_paths = self._failed_case_paths()
+        if not failed_paths:
+            return
+        for path, row in self.rows.items():
+            row.var.set(path in failed_paths)
+        self._run_selected()
+
     def _stop_queue(self):
         self.worker.stop_queue()
 
     def _stop_current(self):
         self.worker.stop_current()
+
+    def _stop_all(self):
+        self.worker.stop_all()
 
     def _append_log(self, text):
         self.log_text.configure(state="normal")
@@ -282,6 +310,20 @@ class ResultsTab(ttk.Frame):
         top.pack(fill="x", padx=8, pady=(8, 4))
         ttk.Button(top, text="Refresh", command=self.refresh).pack(side="left")
         ttk.Button(top, text="Open Screenshots Folder", command=self._open_screenshots).pack(side="left", padx=4)
+        ttk.Button(top, text="Download Failed Report", command=self._download_failed_report).pack(side="left", padx=4)
+
+        # "Fail" covers fail/error outcomes only -- "Cancelled" (a stopped
+        # run, not a real failure) gets its own option instead of being
+        # lumped in.
+        ttk.Label(top, text="Filter:").pack(side="left", padx=(12, 2))
+        self.filter_var = tk.StringVar(value="All")
+        self.filter_combo = ttk.Combobox(
+            top, textvariable=self.filter_var,
+            values=("All", "Pass", "Fail", "Cancelled"),
+            state="readonly", width=10,
+        )
+        self.filter_combo.pack(side="left")
+        self.filter_combo.bind("<<ComboboxSelected>>", lambda e: self._render_tree())
 
         columns = ("name", "started_at", "status", "duration")
         self.tree = ttk.Treeview(self, columns=columns, show="headings", height=10)
@@ -335,16 +377,27 @@ class ResultsTab(ttk.Frame):
 
     def refresh(self):
         self._runs = results_store.list_runs()
+        self._render_tree()
+
+    def _render_tree(self):
         self.tree.delete(*self.tree.get_children())
         # The previously-selected row's detail pane and screenshot links
         # would otherwise keep pointing at a run/screenshots that may no
-        # longer exist (e.g. after Clear Results/Clear Screenshots).
+        # longer exist (e.g. after Clear Results/Clear Screenshots, or now
+        # after switching the status filter to something that excludes it).
         self.detail_text.delete("1.0", "end")
         for child in self.shots_frame.winfo_children():
             child.destroy()
         self._thumbnails = []
+        filt = self.filter_var.get()
         for i, run in enumerate(self._runs):
             status = run.get("status")
+            if filt == "Pass" and status != "pass":
+                continue
+            if filt == "Fail" and status not in ("fail", "error"):
+                continue
+            if filt == "Cancelled" and status != "cancelled":
+                continue
             self.tree.insert("", "end", iid=str(i), values=(
                 run.get("name"), _format_local(run.get("started_at", "")),
                 status, f"{run.get('duration_seconds', 0):.1f}",
@@ -428,6 +481,46 @@ class ResultsTab(ttk.Frame):
         shot_dir = run.get("screenshot_dir") if run else None
         if shot_dir and os.path.isdir(shot_dir):
             subprocess.Popen(["explorer", os.path.abspath(shot_dir)])
+
+    def _download_failed_report(self):
+        """Save a shareable zip: summary.txt (one "Failed at <case>,
+        failed message is <msg>." line per run) plus each run's failure
+        screenshots. An explicit selection in the tree is exported as-is
+        only when it actually is a fail/error run; otherwise (nothing
+        selected, or the selected row is a pass/cancelled run -- which
+        did not fail and has no failure screenshots) every recorded
+        fail/error run is bundled instead (cancelled runs are excluded
+        from that fallback too -- stopping a run isn't the same as it
+        failing), so the button can never produce a summary.txt claiming
+        "Failed at ..." for a run that did not fail.
+        """
+        selected = self._selected_run()
+        now_str = datetime.datetime.now(DISPLAY_TZ).strftime("%Y%m%d_%H%M%S")
+        if selected is not None and selected.get("status") in ("fail", "error"):
+            runs = [selected]
+            case_part = results_store._safe_filename_part(str(selected.get("name") or "case"))
+            default_name = f"failed-report-{case_part}-{now_str}.zip"
+        else:
+            runs = [r for r in self._runs if r.get("status") in ("fail", "error")]
+            default_name = f"failed-report-{now_str}.zip"
+
+        if not runs:
+            messagebox.showinfo("Download Failed Report", "No failed runs to export.")
+            return
+
+        zip_path = filedialog.asksaveasfilename(
+            title="Save Failed Report", defaultextension=".zip",
+            filetypes=[("Zip archive", "*.zip")], initialfile=default_name,
+        )
+        if not zip_path:
+            return  # user cancelled the dialog
+
+        try:
+            results_store.write_failure_report_zip(runs, zip_path)
+        except OSError as e:
+            messagebox.showerror("Download Failed Report", f"Failed to write report: {e}")
+            return
+        messagebox.showinfo("Download Failed Report", f"Saved to:\n{zip_path}")
 
 
 class SettingsTab(ttk.Frame):
@@ -577,8 +670,7 @@ class App(ttk.Frame):
         worker thread is a daemon, so it never gets to run cleanup code on
         interpreter exit -- this has to happen here instead.
         """
-        self.worker.stop_queue()
-        self.worker.stop_current()
+        self.worker.stop_all()
         self.root.destroy()
 
     def _poll_events(self):
