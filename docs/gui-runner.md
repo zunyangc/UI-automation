@@ -33,7 +33,10 @@ setup above.
   `name` / `description` from the CSV's `# CONFIG` section.
 - Type in the **Filter** box to narrow the list by name or description.
 - Check the box next to one or more cases, then click **Run Selected**;
-  or click **Run All** to queue every currently visible case.
+  or click **Run All** to queue every currently visible case. **Run
+  Failed** re-runs only the cases whose most recently recorded result was
+  `fail`/`error` (a `cancelled` run doesn't count as a failure, so it's
+  left out).
 - **Run All queues cases sequentially, not in parallel.** These tests
   drive real mouse/keyboard/UIA on the desktop, so running several at
   once on one DevBox would cause them to steal focus from each other and
@@ -43,7 +46,8 @@ setup above.
 - **Stop Queue** cancels every case that hasn't started yet. **Stop
   Current Run** additionally kills the in-flight `run.ps1` process (and
   its child processes) if you don't want to wait for it to finish on
-  its own; that run is recorded with status `cancelled`.
+  its own; that run is recorded with status `cancelled`. **Stop All**
+  does both at once.
 - The log panel at the bottom streams the stdout/stderr of whichever
   case is currently running.
 
@@ -52,6 +56,9 @@ setup above.
 - A history table of every run recorded in `results/*.json` (name,
   start time, status, duration), newest first. Each row is colored
   green/red/etc. to match the Run tab's status colors.
+- The **Filter** dropdown (All/Pass/Fail/Cancelled) narrows the table to
+  just that outcome; `Fail` matches `fail`/`error` only, `Cancelled` is
+  its own option since stopping a run isn't the same as it failing.
 - Selecting a row shows the stdout/stderr tail for that run, plus a
   list of clickable links (by filename) to any screenshots captured
   under that run's `screenshots/{name}-{timestamp}/` directory --
@@ -60,6 +67,13 @@ setup above.
   size viewing. **Refresh** re-scans `results/` in case another app
   session added new runs (a manual `run.ps1` invocation outside the GUI
   doesn't write to `results/` -- only runs started from this app do).
+- **Download Failed Report** saves a zip you can share with someone else:
+  a `summary.txt` with one line per failed run ("Failed at `<case>` test
+  case, failed message is `<reason>`.") plus that run's failure
+  screenshots (the `*_FAILURE_*.png` files `run_test.py` captures on a
+  failing step) under `screenshots/`. With a row selected, it exports
+  just that run; with nothing selected, it bundles every recorded
+  `fail`/`error` run (again, `cancelled` runs are excluded).
 
 ## Settings tab
 

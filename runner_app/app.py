@@ -21,7 +21,7 @@ import subprocess
 import sys
 import tkinter as tk
 import webbrowser
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 
 from . import results_store, test_catalog
 from .run_worker import RunEvent, RunWorker
@@ -310,6 +310,7 @@ class ResultsTab(ttk.Frame):
         top.pack(fill="x", padx=8, pady=(8, 4))
         ttk.Button(top, text="Refresh", command=self.refresh).pack(side="left")
         ttk.Button(top, text="Open Screenshots Folder", command=self._open_screenshots).pack(side="left", padx=4)
+        ttk.Button(top, text="Download Failed Report", command=self._download_failed_report).pack(side="left", padx=4)
 
         # "Fail" covers fail/error outcomes only -- "Cancelled" (a stopped
         # run, not a real failure) gets its own option instead of being
@@ -480,6 +481,41 @@ class ResultsTab(ttk.Frame):
         shot_dir = run.get("screenshot_dir") if run else None
         if shot_dir and os.path.isdir(shot_dir):
             subprocess.Popen(["explorer", os.path.abspath(shot_dir)])
+
+    def _download_failed_report(self):
+        """Save a shareable zip: summary.txt (one "Failed at <case>,
+        failed message is <msg>." line per run) plus each run's failure
+        screenshots. An explicit selection in the tree is exported as-is;
+        otherwise every recorded fail/error run is bundled (cancelled runs
+        are excluded -- stopping a run isn't the same as it failing).
+        """
+        selected = self._selected_run()
+        now_str = datetime.datetime.now(DISPLAY_TZ).strftime("%Y%m%d_%H%M%S")
+        if selected is not None:
+            runs = [selected]
+            case_part = results_store._safe_filename_part(str(selected.get("name") or "case"))
+            default_name = f"failed-report-{case_part}-{now_str}.zip"
+        else:
+            runs = [r for r in self._runs if r.get("status") in ("fail", "error")]
+            default_name = f"failed-report-{now_str}.zip"
+
+        if not runs:
+            messagebox.showinfo("Download Failed Report", "No failed runs to export.")
+            return
+
+        zip_path = filedialog.asksaveasfilename(
+            title="Save Failed Report", defaultextension=".zip",
+            filetypes=[("Zip archive", "*.zip")], initialfile=default_name,
+        )
+        if not zip_path:
+            return  # user cancelled the dialog
+
+        try:
+            results_store.write_failure_report_zip(runs, zip_path)
+        except OSError as e:
+            messagebox.showerror("Download Failed Report", f"Failed to write report: {e}")
+            return
+        messagebox.showinfo("Download Failed Report", f"Saved to:\n{zip_path}")
 
 
 class SettingsTab(ttk.Frame):
