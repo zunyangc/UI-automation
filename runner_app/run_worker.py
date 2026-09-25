@@ -141,8 +141,23 @@ class RunWorker:
                 # `_pending.pop` and stop_queue()'s `_pending.clear()` both
                 # only ever run while holding `_lock`, so this check is
                 # race-free regardless of whether stop_queue() ran before or
-                # after this item was physically dequeued above.
+                # after this item was physically dequeued above. Setting
+                # `_current_spec` in this *same* lock acquisition (rather
+                # than later, in `_run_one()`) closes the window a plain
+                # `stop_all()` (stop_queue() then stop_current()) would
+                # otherwise race: without this, a spec could be popped from
+                # `_pending` (so stop_queue() no longer sees/cancels it) but
+                # not yet recorded as `_current_spec` (so stop_current()
+                # sees nothing to stop either), letting it start running
+                # right after "Stop All" was pressed. With the pop and the
+                # `_current_spec` assignment atomic, stop_current() always
+                # either sees this spec as current (and stops it, via
+                # `_stop_before_launch_spec` if Popen hasn't run yet) or the
+                # spec was still in `_pending` for stop_queue() to cancel --
+                # never neither.
                 still_pending = self._pending.pop(tc.path, None) is not None
+                if still_pending:
+                    self._current_spec = tc.path
             if not still_pending:
                 continue  # was cancelled via stop_queue while queued
             self._run_one(tc)
@@ -151,12 +166,12 @@ class RunWorker:
         spec_path = tc.path
         rel_spec = os.path.relpath(spec_path, self.repo_root)
 
-        # Publish "running" (and register `_current_spec`, proc still None)
-        # before Popen() so stop_current()'s window is well-defined -- see
-        # stop_current()/`_stop_before_launch_spec` for how a stop request
-        # arriving before Popen() returns is still honored.
-        with self._lock:
-            self._current_spec = spec_path
+        # `_current_spec` is already set (atomically with popping this spec
+        # out of `_pending`) by `_run_loop()` above -- see the comment there
+        # for why that matters for `stop_all()`. Proc is still None here, so
+        # stop_current()'s window is well-defined -- see stop_current()/
+        # `_stop_before_launch_spec` for how a stop request arriving before
+        # Popen() returns is still honored.
         self.events.put(RunEvent(RunEvent.RUNNING, spec_path, name=tc.display_name))
 
         started_at = datetime.datetime.now(datetime.timezone.utc)

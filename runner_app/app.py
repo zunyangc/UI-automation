@@ -485,13 +485,18 @@ class ResultsTab(ttk.Frame):
     def _download_failed_report(self):
         """Save a shareable zip: summary.txt (one "Failed at <case>,
         failed message is <msg>." line per run) plus each run's failure
-        screenshots. An explicit selection in the tree is exported as-is;
-        otherwise every recorded fail/error run is bundled (cancelled runs
-        are excluded -- stopping a run isn't the same as it failing).
+        screenshots. An explicit selection in the tree is exported as-is
+        only when it actually is a fail/error run; otherwise (nothing
+        selected, or the selected row is a pass/cancelled run -- which
+        did not fail and has no failure screenshots) every recorded
+        fail/error run is bundled instead (cancelled runs are excluded
+        from that fallback too -- stopping a run isn't the same as it
+        failing), so the button can never produce a summary.txt claiming
+        "Failed at ..." for a run that did not fail.
         """
         selected = self._selected_run()
         now_str = datetime.datetime.now(DISPLAY_TZ).strftime("%Y%m%d_%H%M%S")
-        if selected is not None:
+        if selected is not None and selected.get("status") in ("fail", "error"):
             runs = [selected]
             case_part = results_store._safe_filename_part(str(selected.get("name") or "case"))
             default_name = f"failed-report-{case_part}-{now_str}.zip"
