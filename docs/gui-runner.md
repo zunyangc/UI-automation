@@ -51,6 +51,47 @@ setup above.
 - The log panel at the bottom streams the stdout/stderr of whichever
   case is currently running.
 
+### Run Suite (Auto-Retry)
+
+A second row of buttons drives [`run_suite.py`](../run_suite.py) (via
+`run_suite.ps1`) against the checked cases instead of the regular queue:
+
+- **Run Suite (Auto-Retry)** launches a suite run: each selected case
+  runs, any that fail are retried (up to **Max retries**), and the suite
+  stops retrying a case once it's "stuck" -- it fails the same way twice
+  in a row -- or its own per-case/overall timeouts are hit. This is the
+  same auto-retry logic the CLI uses; see the [README](../README.md#run-a-suite-with-auto-retry-and-a-local-report)
+  for the full algorithm.
+- **Suite Options...** opens a dialog to set **Max retries**, **Per-case
+  timeout (minutes)**, and **Overall suite timeout (minutes, 0 =
+  disabled)** before launching. These values are kept only for the
+  current GUI session (not written to disk), so they reset to the
+  defaults (2 retries / 35 min / disabled) the next time you launch the
+  app.
+- **Stop Suite Run** force-kills the in-flight suite process. Because
+  Windows force-kill has no graceful-shutdown hook, this usually means
+  no `summary.json`/`report.html` was written for that attempt -- the
+  log panel notes "no report was generated" in that case, matching how
+  **Stop Current Run** doesn't produce a special report for a cancelled
+  regular run either.
+- **Open Suite Report** opens the most recently completed suite's
+  `report.html` in your default browser. It's disabled until a suite run
+  finishes with a report on disk.
+- Each case's status pill on the Run tab updates to its *final* status
+  from the suite (`pass`, `fail`, `stuck`, `timeout`, etc.) once the
+  suite finishes -- not after every individual retry attempt, since
+  those intermediate results are visible in the log panel instead.
+- Suite runs write into `result/gui-suite-{timestamp}/` (as opposed to
+  the CLI default `result/suite-{timestamp}/`), so it's clear at a
+  glance which tool produced a given report folder. Suite runs still
+  call the same `save_run()` used elsewhere, so every case attempt also
+  shows up in the Results tab like any other run.
+- **The regular run queue (Run Selected / Run All / Run Failed) and Run
+  Suite are mutually exclusive** -- both ultimately drive `run.ps1`
+  processes that would otherwise fight over mouse/keyboard focus on one
+  desktop session, so each set of buttons is disabled while the other
+  mode is active.
+
 ## Results tab
 
 - A history table of every run recorded in `results/*.json` (name,
@@ -86,6 +127,11 @@ setup above.
   -- Visual Studio's default project location, where most test cases
   create/build throwaway projects. Use this to wipe leftover clutter from
   past runs.
+- **Open Last Suite Report** opens the most recently completed Run Suite
+  (Auto-Retry) report in your default browser (same report as the Run
+  tab's **Open Suite Report** button, kept here too since Settings is
+  the tab testers check between sessions). Disabled until a suite run
+  has produced a report in this session.
 - All three cleanup buttons are shown with red text (right-aligned, same
   size) and, when clicked, show a Yes/No warning dialog stating the
   action is irreversible before doing anything.
