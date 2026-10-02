@@ -119,6 +119,31 @@ class ExtractFailureMessageTests(unittest.TestCase):
         )
 
 
+class ExtractFailureStepTests(unittest.TestCase):
+    def test_step_failed_line(self):
+        stdout = "*** STEP FAILED: step_21: exit 1, expected 0\n"
+        self.assertEqual(results_store.extract_failure_step(stdout), "step_21")
+
+    def test_step_raised_unexpected_error_line(self):
+        stdout = "*** STEP RAISED UNEXPECTED ERROR: step_2: bad capture selector\n"
+        self.assertEqual(results_store.extract_failure_step(stdout), "step_2")
+
+    def test_prefers_last_step_failed_line_when_multiple(self):
+        stdout = (
+            "*** STEP FAILED: step_1: first\n"
+            "*** STEP FAILED: step_5: second\n"
+        )
+        self.assertEqual(results_store.extract_failure_step(stdout), "step_5")
+
+    def test_runner_error_has_no_step(self):
+        stdout = "RUNNER ERROR: script not found: scripts/x.py\n"
+        self.assertIsNone(results_store.extract_failure_step(stdout))
+
+    def test_empty_stdout_returns_none(self):
+        self.assertIsNone(results_store.extract_failure_step(""))
+        self.assertIsNone(results_store.extract_failure_step(None))
+
+
 class FailureScreenshotPathsTests(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
