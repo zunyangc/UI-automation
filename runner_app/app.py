@@ -25,10 +25,12 @@ from tkinter import filedialog, messagebox, ttk
 
 from . import results_store, test_catalog
 from .run_worker import RunEvent, RunWorker
+from .suite_worker import SuiteRunEvent, SuiteRunWorker
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESULTS_DIR = os.path.join(REPO_ROOT, "results")
 SCREENSHOTS_DIR = os.path.join(REPO_ROOT, "screenshots")
+RESULT_DIR = os.path.join(REPO_ROOT, "result")
 # Results are recorded (and stored on disk) in UTC, but testers are in
 # Malaysia/Singapore (UTC+8) -- convert for display in the Results tab only.
 DISPLAY_TZ = datetime.timezone(datetime.timedelta(hours=8))
@@ -68,7 +70,21 @@ STATUS_COLOR = {
     "fail": "#d93025",
     "error": "#e37400",
     "cancelled": "#808080",
+    # Final per-case outcomes a Run Suite (Auto-Retry) invocation can
+    # assign to a row (see SuiteRunWorker / RunTab.handle_suite_event) --
+    # all treated visually like a failure/warning, consistent with the
+    # existing fail/error colors above.
+    "stuck": "#d93025",
+    "retries_exhausted": "#d93025",
+    "timeout": "#e37400",
+    "not_run_timeout": "#e37400",
 }
+
+# Default suite-run options shown in the "Suite Options..." dialog --
+# mirrors run_suite.py's own argparse defaults.
+DEFAULT_SUITE_MAX_RETRIES = 2
+DEFAULT_SUITE_CASE_TIMEOUT_MIN = 35
+DEFAULT_SUITE_SUITE_TIMEOUT_MIN = 0  # disabled
 
 # Max width/height (px) for the Results tab's screenshot thumbnails.
 THUMBNAIL_SIZE = 96
@@ -130,11 +146,29 @@ class RunRow:
 
 
 class RunTab(ttk.Frame):
-    def __init__(self, parent, worker, on_run_started):
+    def __init__(self, parent, worker, on_run_started, suite_worker=None, on_suite_done=None):
         super().__init__(parent)
         self.worker = worker
         self.on_run_started = on_run_started
+        self.suite_worker = suite_worker
+        self.on_suite_done = on_suite_done
         self.rows = {}  # spec_path -> RunRow
+        # Specs currently queued or running via the regular RunWorker --
+        # used to keep "Run Suite (Auto-Retry)" disabled while a regular
+        # queue is active (see §12 of RUN-SUITE-UI-INTEGRATION-SPEC.md:
+        # the two run modes are mutually exclusive since both ultimately
+        # drive run.ps1 processes that would otherwise fight for
+        # mouse/keyboard focus).
+        self._active_regular_specs = set()
+        self._suite_running = False
+        # Session-only memory of the last-used suite options (not
+        # persisted to disk) so repeated suite runs don't need re-entry.
+        self._suite_options = {
+            "max_retries": DEFAULT_SUITE_MAX_RETRIES,
+            "case_timeout_min": DEFAULT_SUITE_CASE_TIMEOUT_MIN,
+            "suite_timeout_min": DEFAULT_SUITE_SUITE_TIMEOUT_MIN,
+        }
+        self._last_report_path = None
 
         top = ttk.Frame(self)
         top.pack(fill="x", padx=8, pady=(8, 4))
@@ -175,21 +209,43 @@ class RunTab(ttk.Frame):
             canvas.unbind_all("<Shift-MouseWheel>"),
         ))
 
+        # rel_path -> TestCase, so a suite run's summary.json (which only
+        # knows the relative spec paths it was launched with) can be
+        # mapped back to the row keyed by absolute path below.
+        self._rel_to_tc = {}
         for tc in test_catalog.discover():
             row = RunRow(self.list_frame, tc, self._noop)
             row.frame.pack(fill="x", anchor="w", pady=1)
             self.rows[tc.path] = row
+            self._rel_to_tc[tc.rel_path] = tc
 
         btns = ttk.Frame(self)
         btns.pack(fill="x", padx=8, pady=4)
-        ttk.Button(btns, text="Run Selected", command=self._run_selected).pack(side="left", padx=2)
-        ttk.Button(btns, text="Run All", command=self._run_all).pack(side="left", padx=2)
-        ttk.Button(btns, text="Run Failed", command=self._run_failed).pack(side="left", padx=2)
+        self.btn_run_selected = ttk.Button(btns, text="Run Selected", command=self._run_selected)
+        self.btn_run_selected.pack(side="left", padx=2)
+        self.btn_run_all = ttk.Button(btns, text="Run All", command=self._run_all)
+        self.btn_run_all.pack(side="left", padx=2)
+        self.btn_run_failed = ttk.Button(btns, text="Run Failed", command=self._run_failed)
+        self.btn_run_failed.pack(side="left", padx=2)
         ttk.Button(btns, text="Stop Current Run", command=self._stop_current).pack(side="left", padx=2)
         ttk.Button(btns, text="Stop Queue", command=self._stop_queue).pack(side="left", padx=2)
         ttk.Button(btns, text="Stop All", command=self._stop_all).pack(side="left", padx=2)
 
-        ttk.Label(self, text="Log (currently running case):").pack(anchor="w", padx=8)
+        suite_btns = ttk.Frame(self)
+        suite_btns.pack(fill="x", padx=8, pady=(0, 4))
+        self.btn_run_suite = ttk.Button(
+            suite_btns, text="Run Suite (Auto-Retry)", command=self._run_suite)
+        self.btn_run_suite.pack(side="left", padx=2)
+        ttk.Button(suite_btns, text="Suite Options...", command=self._open_suite_options).pack(
+            side="left", padx=2)
+        self.btn_stop_suite = ttk.Button(
+            suite_btns, text="Stop Suite Run", command=self._stop_suite, state="disabled")
+        self.btn_stop_suite.pack(side="left", padx=2)
+        self.btn_open_suite_report = ttk.Button(
+            suite_btns, text="Open Suite Report", command=self._open_suite_report, state="disabled")
+        self.btn_open_suite_report.pack(side="left", padx=2)
+
+        ttk.Label(self, text="Log (currently running case / suite):").pack(anchor="w", padx=8)
         self.log_text = tk.Text(self, height=10, state="disabled", wrap="none")
         self.log_text.pack(fill="both", expand=False, padx=8, pady=(0, 8))
 
@@ -222,11 +278,21 @@ class RunTab(ttk.Frame):
         return [row.test_case for row in self.rows.values() if row.var.get()]
 
     def _run_selected(self):
+        if self._suite_running:
+            return
         cases = self._selected_cases()
         if not cases:
             return
         for tc in cases:
             self.rows[tc.path].set_status(RunEvent.QUEUED)
+            # Mark these specs active *before* handing them to the worker:
+            # enqueue() only posts a QUEUED event asynchronously (consumed
+            # later by handle_event() via the GUI's poll loop), so without
+            # this, a suite run could slip in and start concurrently during
+            # that window, defeating mutual exclusion -- see
+            # _refresh_button_states().
+            self._active_regular_specs.add(tc.path)
+        self._refresh_button_states()
         self.worker.enqueue(cases)
         self.on_run_started()
 
@@ -291,15 +357,154 @@ class RunTab(ttk.Frame):
         row = self.rows.get(event.spec_path)
         if event.kind == RunEvent.QUEUED and row:
             row.set_status("queued")
+            self._active_regular_specs.add(event.spec_path)
+            self._refresh_button_states()
         elif event.kind == RunEvent.RUNNING and row:
             row.set_status("running")
             self._clear_log()
+            self._active_regular_specs.add(event.spec_path)
+            self._refresh_button_states()
         elif event.kind == RunEvent.OUTPUT:
             self._append_log(event.data.get("line", ""))
         elif event.kind == RunEvent.DONE and row:
             row.set_status(event.data.get("status", "error"))
+            self._active_regular_specs.discard(event.spec_path)
+            self._refresh_button_states()
         elif event.kind == RunEvent.CANCELLED and row:
             row.set_status("cancelled")
+            self._active_regular_specs.discard(event.spec_path)
+            self._refresh_button_states()
+
+    # -- Run Suite (Auto-Retry) --------------------------------------
+
+    def _refresh_button_states(self):
+        """Keep the regular queue buttons and the suite-run buttons
+        mutually exclusive: both ultimately drive `run.ps1` processes
+        that would otherwise fight over mouse/keyboard focus on one
+        desktop session (see RUN-SUITE-UI-INTEGRATION-SPEC.md §12,
+        resolved as "mutually exclusive" for this implementation).
+        """
+        regular_busy = bool(self._active_regular_specs)
+        for btn in (self.btn_run_selected, self.btn_run_all, self.btn_run_failed):
+            btn.configure(state="disabled" if self._suite_running else "normal")
+        self.btn_run_suite.configure(
+            state="disabled" if (regular_busy or self._suite_running) else "normal")
+        self.btn_stop_suite.configure(state="normal" if self._suite_running else "disabled")
+        self.btn_open_suite_report.configure(
+            state="normal" if self._last_report_path else "disabled")
+
+    def _open_suite_options(self):
+        """Modal dialog to edit --max-retries / --case-timeout-min /
+        --suite-timeout-min before launching a suite run. Values are kept
+        in `self._suite_options` for the lifetime of this GUI session
+        only (not persisted to disk) -- see RUN-SUITE-UI-INTEGRATION-SPEC.md
+        §12, Q2.
+        """
+        dialog = tk.Toplevel(self)
+        dialog.title("Suite Options")
+        dialog.transient(self.winfo_toplevel())
+        dialog.resizable(False, False)
+        dialog.grab_set()
+
+        fields = (
+            ("max_retries", "Max retries (additional attempts per case):"),
+            ("case_timeout_min", "Per-case timeout (minutes):"),
+            ("suite_timeout_min", "Overall suite timeout (minutes, 0 = disabled):"),
+        )
+        vars_ = {}
+        for i, (key, label) in enumerate(fields):
+            ttk.Label(dialog, text=label).grid(row=i, column=0, sticky="w", padx=8, pady=6)
+            var = tk.StringVar(value=str(self._suite_options[key]))
+            vars_[key] = var
+            ttk.Entry(dialog, textvariable=var, width=10).grid(
+                row=i, column=1, sticky="w", padx=(0, 8), pady=6)
+
+        def _save():
+            try:
+                max_retries = int(vars_["max_retries"].get())
+                case_timeout_min = float(vars_["case_timeout_min"].get())
+                suite_timeout_min = float(vars_["suite_timeout_min"].get())
+                if max_retries < 0 or case_timeout_min <= 0 or suite_timeout_min < 0:
+                    raise ValueError("values must be non-negative (timeouts must be > 0)")
+            except ValueError as e:
+                messagebox.showerror("Suite Options", f"Invalid value: {e}", parent=dialog)
+                return
+            self._suite_options = {
+                "max_retries": max_retries,
+                "case_timeout_min": case_timeout_min,
+                "suite_timeout_min": suite_timeout_min,
+            }
+            dialog.destroy()
+
+        btn_row = ttk.Frame(dialog)
+        btn_row.grid(row=len(fields), column=0, columnspan=2, pady=(4, 8))
+        ttk.Button(btn_row, text="Save", command=_save).pack(side="left", padx=4)
+        ttk.Button(btn_row, text="Cancel", command=dialog.destroy).pack(side="left", padx=4)
+        dialog.bind("<Return>", lambda e: _save())
+        dialog.bind("<Escape>", lambda e: dialog.destroy())
+
+    def _run_suite(self):
+        if self.suite_worker is None or self._suite_running or self._active_regular_specs:
+            return
+        cases = self._selected_cases()
+        if not cases:
+            return
+        spec_paths = [tc.rel_path for tc in cases]
+        ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%SZ")
+        report_dir = os.path.join(RESULT_DIR, f"gui-suite-{ts}")
+        for tc in cases:
+            self.rows[tc.path].set_status("queued")
+        started = self.suite_worker.start(
+            spec_paths,
+            self._suite_options["max_retries"],
+            self._suite_options["case_timeout_min"],
+            self._suite_options["suite_timeout_min"],
+            report_dir,
+        )
+        if not started:
+            return
+        self._suite_running = True
+        self._refresh_button_states()
+
+    def _stop_suite(self):
+        if self.suite_worker is not None:
+            self.suite_worker.stop()
+
+    def _open_suite_report(self):
+        if self._last_report_path and os.path.isfile(self._last_report_path):
+            webbrowser.open(f"file:///{self._last_report_path}")
+        else:
+            messagebox.showinfo("Open Suite Report", "No suite report is available yet.")
+
+    def handle_suite_event(self, event):
+        if event.kind == SuiteRunEvent.STARTED:
+            self._clear_log()
+            self._append_log(f"=== Suite run started -- report: {event.data.get('report_dir')} ===\n")
+            return
+        if event.kind == SuiteRunEvent.OUTPUT:
+            self._append_log(event.data.get("line", ""))
+            return
+        # DONE / CANCELLED: apply each case's final status from
+        # summary.json (if it was written) and release the mutual-
+        # exclusion lock against the regular run queue.
+        self._suite_running = False
+        summary = event.data.get("summary")
+        if summary:
+            for case in summary.get("cases", []):
+                tc = self._rel_to_tc.get(case.get("spec"))
+                if tc is not None and tc.path in self.rows:
+                    self.rows[tc.path].set_status(case.get("final_status", "error"))
+            counts = summary.get("counts", {})
+            counts_str = ", ".join(f"{k}: {v}" for k, v in sorted(counts.items()))
+            self._append_log(f"\n=== Suite finished ({counts_str}) ===\n")
+        else:
+            self._append_log("\n=== Suite run stopped -- no report was generated ===\n")
+        report_path = event.data.get("report_path")
+        if report_path and os.path.isfile(report_path):
+            self._last_report_path = report_path
+            if self.on_suite_done:
+                self.on_suite_done(report_path)
+        self._refresh_button_states()
 
 
 class ResultsTab(ttk.Frame):
@@ -528,10 +733,12 @@ class SettingsTab(ttk.Frame):
 
     _BTN_WIDTH = 18  # same width for all three cleanup buttons
 
-    def __init__(self, parent, on_results_cleared=None, on_screenshots_cleared=None):
+    def __init__(self, parent, on_results_cleared=None, on_screenshots_cleared=None,
+                 get_last_suite_report=None):
         super().__init__(parent)
         self.on_results_cleared = on_results_cleared
         self.on_screenshots_cleared = on_screenshots_cleared
+        self.get_last_suite_report = get_last_suite_report
 
         style = ttk.Style(self)
         # Default ttk button look, just with red text, per user request.
@@ -569,6 +776,36 @@ class SettingsTab(ttk.Frame):
         link = ttk.Label(row4, text=REPO_URL, foreground="#1a73e8", cursor="hand2")
         link.pack(side="left", padx=(4, 0))
         link.bind("<Button-1>", lambda e: webbrowser.open(REPO_URL))
+
+        row5 = ttk.Frame(about)
+        row5.pack(fill="x", padx=8, pady=(0, 8))
+        ttk.Label(row5, text="Last Run Suite (Auto-Retry) report:").pack(side="left")
+        self.btn_open_last_suite_report = ttk.Button(
+            row5, text="Open Last Suite Report", command=self._open_last_suite_report,
+            state="disabled")
+        self.btn_open_last_suite_report.pack(side="left", padx=(8, 0))
+        self.refresh_suite_report_button()
+
+    def refresh_suite_report_button(self):
+        """Enable "Open Last Suite Report" only once a suite run has
+        actually produced a report on disk -- called once at startup and
+        again by App whenever a suite run finishes, since this tab has no
+        other way to learn that `get_last_suite_report()`'s answer changed.
+        """
+        report_path = self.get_last_suite_report() if self.get_last_suite_report else None
+        enabled = bool(report_path and os.path.isfile(report_path))
+        self.btn_open_last_suite_report.configure(state="normal" if enabled else "disabled")
+
+    def _open_last_suite_report(self):
+        report_path = self.get_last_suite_report() if self.get_last_suite_report else None
+        if report_path and os.path.isfile(report_path):
+            webbrowser.open(f"file:///{report_path}")
+        else:
+            messagebox.showinfo(
+                "Open Last Suite Report",
+                "No suite report is available yet -- run \"Run Suite (Auto-Retry)\" "
+                "from the Run tab first.",
+            )
 
     def _confirm_irreversible(self, title, message):
         return messagebox.askyesno(
@@ -639,15 +876,21 @@ class App(ttk.Frame):
         super().__init__(root)
         self.root = root
         self.worker = RunWorker(repo_root=REPO_ROOT)
+        self.suite_worker = SuiteRunWorker(repo_root=REPO_ROOT)
+        self._last_suite_report_path = None
         self.pack(fill="both", expand=True)
 
         notebook = ttk.Notebook(self)
         notebook.pack(fill="both", expand=True)
         self.results_tab = ResultsTab(notebook)
-        self.run_tab = RunTab(notebook, self.worker, on_run_started=self._noop)
+        self.run_tab = RunTab(
+            notebook, self.worker, on_run_started=self._noop,
+            suite_worker=self.suite_worker, on_suite_done=self._on_suite_done,
+        )
         self.settings_tab = SettingsTab(
             notebook, on_results_cleared=self._on_results_cleared,
             on_screenshots_cleared=self.results_tab.refresh,
+            get_last_suite_report=lambda: self._last_suite_report_path,
         )
         notebook.add(self.run_tab, text="Run")
         notebook.add(self.results_tab, text="Results")
@@ -660,17 +903,23 @@ class App(ttk.Frame):
         self.results_tab.refresh()
         self.run_tab.reset_status()
 
+    def _on_suite_done(self, report_path):
+        self._last_suite_report_path = report_path
+        self.settings_tab.refresh_suite_report_button()
+
     def _noop(self):
         pass
 
     def on_close(self):
-        """Make sure closing the window can't leave an orphaned run.ps1
-        process tree behind: cancel anything still queued and forcibly
-        kill the in-flight process (if any) before the app exits. The
-        worker thread is a daemon, so it never gets to run cleanup code on
-        interpreter exit -- this has to happen here instead.
+        """Make sure closing the window can't leave an orphaned run.ps1 /
+        run_suite.py process tree behind: cancel anything still queued and
+        forcibly kill the in-flight process(es) (if any) before the app
+        exits. The worker threads are daemons, so they never get to run
+        cleanup code on interpreter exit -- this has to happen here
+        instead.
         """
         self.worker.stop_all()
+        self.suite_worker.stop()
         self.root.destroy()
 
     def _poll_events(self):
@@ -679,6 +928,14 @@ class App(ttk.Frame):
                 event = self.worker.events.get_nowait()
                 self.run_tab.handle_event(event)
                 if event.kind == RunEvent.DONE:
+                    self.results_tab.refresh()
+        except queue.Empty:
+            pass
+        try:
+            while True:
+                event = self.suite_worker.events.get_nowait()
+                self.run_tab.handle_suite_event(event)
+                if event.kind in (SuiteRunEvent.DONE, SuiteRunEvent.CANCELLED):
                     self.results_tab.refresh()
         except queue.Empty:
             pass

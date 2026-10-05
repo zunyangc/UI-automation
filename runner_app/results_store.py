@@ -125,6 +125,24 @@ def extract_failure_message(stdout_tail):
     return "(no failure detail captured)"
 
 
+def extract_failure_step(stdout_tail):
+    """Return just the `step_N` id from the last `*** STEP FAILED: step_N:
+    ...` / `*** STEP RAISED UNEXPECTED ERROR: step_N: ...` marker line in
+    `stdout_tail`, or `None` if no such line is present (e.g. a runner-level
+    error, or a clean pass). Used by callers that need to compare *which*
+    step failed across repeated attempts of the same case without
+    re-parsing stdout themselves (see `extract_failure_message` for the
+    full detail string).
+    """
+    lines = (stdout_tail or "").splitlines()
+    for line in reversed(lines):
+        m = _FAILURE_LINE_RE.match(line.strip())
+        if m:
+            step_id, _, _ = m.group(1).partition(":")
+            return step_id.strip() or None
+    return None
+
+
 def failure_screenshot_paths(screenshot_dir):
     """Return the sorted list of this run's `*_FAILURE_*.png` screenshots
     (the ones `run_test.py`'s `on_failure_capture()` writes), or `[]` if

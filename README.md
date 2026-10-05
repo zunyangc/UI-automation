@@ -37,6 +37,15 @@ Add `-q` (or `--quiet`) to suppress per-step echo and successful subcommand stdo
 
 **On any step failure**, before reporting `RESULT: FAIL`, the runner automatically: screenshots the current UI state, screenshots the console/log window if the CSV captured one (a `capture` var whose name contains `cmd`/`console`, e.g. `vars.cmd_hwnd`), and force-closes every window handle the CSV captured (via `close_window.py --force`) so a failed run doesn't leave apps/consoles orphaned for the next run. Each of these is best-effort and never masks the original failure.
 
+## Run a suite with auto-retry and a local report
+
+```powershell
+.\run_suite.ps1 test_cases\e2e-001-verify_dotnet_info.csv test_cases\prod-001-cs_console_app.csv
+.\run_suite.ps1 --all
+```
+
+Runs each case via `run.ps1`, automatically retries only the cases that fail (up to `--max-retries`, default 2), stops retrying a case once it looks stuck (same failure twice in a row, a runner error, or two timeouts), enforces a per-case timeout (`--case-timeout-min`) and an optional overall `--suite-timeout-min` so a run can't overrun unattended, and writes a local `report.html` + `summary.json` (+ `failures.zip` on any failure) under `result/suite-{timestamp}/`. See [`docs/file-structure.md`](docs/file-structure.md) for the full behavior.
+
 ## Run tests from a GUI (in-DevBox runner)
 
 ```powershell

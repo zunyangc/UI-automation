@@ -11,6 +11,8 @@ A guided tour of every file and folder in this repo, so you can find your way ar
 | `LICENSE` | MIT license. |
 | `run.ps1` | Thin shortcut wrapper: `.\run.ps1 <spec> [-q]` → `uv run python run_test.py <spec> [-q]`. Lets you invoke a scenario without going through an LLM. |
 | `run_test.py` | CSV test-spec runner (see [Entry points](#entry-points)). |
+| `run_suite.ps1` | Thin shortcut wrapper: `.\run_suite.ps1 <specs...\|--all> [options]` → `uv run python run_suite.py ...`. |
+| `run_suite.py` | Multi-case suite runner with auto-retry of failed cases and a local HTML/JSON report (see [Entry points](#entry-points)). |
 | `pyproject.toml` | Project metadata + direct dependencies (`pyautogui`, `pywinauto`, `Pillow`, `websocket-client`). Pins Python to `>=3.10,<3.13`. |
 | `requirements.txt` | Human-edited top-level requirements list (mirrors `pyproject.toml` deps). |
 | `requirements.lock.txt` | Fully resolved, pinned dependency list for `pip` users. |
@@ -89,6 +91,40 @@ The test runner. Given a CSV spec, it:
 Pass `-q` / `--quiet` to suppress per-step headers and successful subcommand stdout — useful when running under an LLM to keep token usage down. Failure output, stderr, and the final `RESULT` line are always shown.
 
 Usage: `uv run python run_test.py test_cases\<scenario>.csv [-q]`.
+
+### `run_suite.ps1` / `run_suite.py`
+Multi-case orchestrator built on top of `run.ps1` — it does not change how
+any single spec runs. Given one or more CSV paths (or `--all` for every
+`test_cases/*.csv` except `_template.csv`), it:
+
+- Runs each case in turn via the same `run.ps1` subprocess the GUI runner
+  uses, enforcing a hard per-attempt timeout (`--case-timeout-min`,
+  default 35) that force-kills a hung process tree.
+- Persists every attempt as its own `results/*.json` file via
+  `runner_app/results_store.py: save_run()` — the same JSON files the GUI
+  Results tab reads.
+- Automatically re-queues only the cases that didn't pass, retrying up to
+  `--max-retries` (default 2) additional times per round.
+- Stops retrying a case early once it looks **stuck**: a runner-level
+  `error`, two consecutive `timeout`s, or two consecutive failures at the
+  same step with the same (digit-normalized) message.
+- Honors an overall `--suite-timeout-min` cap (disabled by default) so an
+  unattended invocation can't run indefinitely; cases it doesn't reach in
+  time are recorded as `not_run_timeout`.
+- Writes a local report to `--report-dir` (default `result/suite-{timestamp}/`):
+  `summary.json` (every attempt of every case), `report.html`
+  (self-contained, double-click to open), and `failures.zip` (summary +
+  failure screenshots) when at least one case didn't pass.
+
+```powershell
+.\run_suite.ps1 test_cases\e2e-001-verify_dotnet_info.csv test_cases\prod-001-cs_console_app.csv
+.\run_suite.ps1 --all
+.\run_suite.ps1 --all --max-retries 2 --suite-timeout-min 180
+```
+
+Exit codes: `0` every case passed, `1` at least one case ended
+`fail`/`stuck`/`error`/`timeout`/`not_run_timeout`, `2` runner-level
+problem (bad args, no specs resolved).
 
 ## `scripts/`
 
