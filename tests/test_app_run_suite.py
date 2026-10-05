@@ -104,6 +104,24 @@ class RunTabSuiteIntegrationTests(unittest.TestCase):
         tab.handle_event(RunEvent(RunEvent.DONE, tc.path, status="pass"))
         self.assertEqual(str(tab.btn_run_suite["state"]), "normal")
 
+    def test_run_selected_marks_specs_active_synchronously(self):
+        # RunWorker.enqueue() only posts a QUEUED event asynchronously
+        # (consumed later via the GUI's poll loop) -- _run_selected()
+        # itself must mark the spec active and disable Run Suite
+        # immediately, in the same call, so a suite run can't slip in
+        # and start concurrently during that polling window.
+        worker = MagicMock()
+        tc = FakeTestCase("/abs/a.csv", "test_cases/a.csv")
+        tab = self._make_tab([tc], suite_worker=MagicMock())
+        tab.worker = worker
+        tab.rows[tc.path].var.set(True)
+
+        tab._run_selected()
+
+        worker.enqueue.assert_called_once()
+        self.assertIn(tc.path, tab._active_regular_specs)
+        self.assertEqual(str(tab.btn_run_suite["state"]), "disabled")
+
     def test_regular_run_buttons_disabled_while_suite_running(self):
         suite_worker = MagicMock()
         suite_worker.start.return_value = True
@@ -200,6 +218,59 @@ class RunTabSuiteIntegrationTests(unittest.TestCase):
         # Invalid input leaves options unchanged and the dialog open.
         self.assertEqual(tab._suite_options, original)
         self.assertTrue(dialog.winfo_exists())
+
+
+class SettingsTabSuiteReportButtonTests(unittest.TestCase):
+    """The Settings tab's "Open Last Suite Report" button must reflect
+    whether a suite report actually exists on disk, not just be
+    permanently clickable (see SettingsTab.refresh_suite_report_button()).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            cls.root = tk.Tk()
+        except tk.TclError as e:
+            raise unittest.SkipTest(f"Tk not available in this environment: {e}")
+        cls.root.withdraw()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.root.destroy()
+
+    def test_button_starts_disabled_when_no_report_exists(self):
+        tab = app_module.SettingsTab(self.root, get_last_suite_report=lambda: None)
+        self.addCleanup(tab.destroy)
+        self.assertEqual(str(tab.btn_open_last_suite_report["state"]), "disabled")
+
+    def test_button_enabled_after_refresh_once_report_file_exists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report_path = os.path.join(tmp, "report.html")
+            with open(report_path, "w") as f:
+                f.write("<html></html>")
+            tab = app_module.SettingsTab(self.root, get_last_suite_report=lambda: report_path)
+            self.addCleanup(tab.destroy)
+            self.assertEqual(str(tab.btn_open_last_suite_report["state"]), "normal")
+
+    def test_button_disabled_when_reported_path_does_not_exist_on_disk(self):
+        missing_path = os.path.join(REPO_ROOT, "__no_such_dir__", "report.html")
+        tab = app_module.SettingsTab(self.root, get_last_suite_report=lambda: missing_path)
+        self.addCleanup(tab.destroy)
+        self.assertEqual(str(tab.btn_open_last_suite_report["state"]), "disabled")
+
+    def test_refresh_suite_report_button_reflects_later_change(self):
+        state = {"path": None}
+        tab = app_module.SettingsTab(self.root, get_last_suite_report=lambda: state["path"])
+        self.addCleanup(tab.destroy)
+        self.assertEqual(str(tab.btn_open_last_suite_report["state"]), "disabled")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            report_path = os.path.join(tmp, "report.html")
+            with open(report_path, "w") as f:
+                f.write("<html></html>")
+            state["path"] = report_path
+            tab.refresh_suite_report_button()
+            self.assertEqual(str(tab.btn_open_last_suite_report["state"]), "normal")
 
 
 if __name__ == "__main__":

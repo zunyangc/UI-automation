@@ -285,6 +285,14 @@ class RunTab(ttk.Frame):
             return
         for tc in cases:
             self.rows[tc.path].set_status(RunEvent.QUEUED)
+            # Mark these specs active *before* handing them to the worker:
+            # enqueue() only posts a QUEUED event asynchronously (consumed
+            # later by handle_event() via the GUI's poll loop), so without
+            # this, a suite run could slip in and start concurrently during
+            # that window, defeating mutual exclusion -- see
+            # _refresh_button_states().
+            self._active_regular_specs.add(tc.path)
+        self._refresh_button_states()
         self.worker.enqueue(cases)
         self.on_run_started()
 
@@ -772,8 +780,21 @@ class SettingsTab(ttk.Frame):
         row5 = ttk.Frame(about)
         row5.pack(fill="x", padx=8, pady=(0, 8))
         ttk.Label(row5, text="Last Run Suite (Auto-Retry) report:").pack(side="left")
-        ttk.Button(row5, text="Open Last Suite Report",
-                   command=self._open_last_suite_report).pack(side="left", padx=(8, 0))
+        self.btn_open_last_suite_report = ttk.Button(
+            row5, text="Open Last Suite Report", command=self._open_last_suite_report,
+            state="disabled")
+        self.btn_open_last_suite_report.pack(side="left", padx=(8, 0))
+        self.refresh_suite_report_button()
+
+    def refresh_suite_report_button(self):
+        """Enable "Open Last Suite Report" only once a suite run has
+        actually produced a report on disk -- called once at startup and
+        again by App whenever a suite run finishes, since this tab has no
+        other way to learn that `get_last_suite_report()`'s answer changed.
+        """
+        report_path = self.get_last_suite_report() if self.get_last_suite_report else None
+        enabled = bool(report_path and os.path.isfile(report_path))
+        self.btn_open_last_suite_report.configure(state="normal" if enabled else "disabled")
 
     def _open_last_suite_report(self):
         report_path = self.get_last_suite_report() if self.get_last_suite_report else None
@@ -884,6 +905,7 @@ class App(ttk.Frame):
 
     def _on_suite_done(self, report_path):
         self._last_suite_report_path = report_path
+        self.settings_tab.refresh_suite_report_button()
 
     def _noop(self):
         pass

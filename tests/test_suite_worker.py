@@ -196,6 +196,55 @@ class SuiteRunWorkerTests(unittest.TestCase):
             worker.stop()
         mock_run.assert_not_called()
 
+    def test_stop_called_before_popen_registers_still_kills_process(self):
+        # Simulates clicking Stop in the window between start() returning
+        # and the worker thread's subprocess.Popen() call completing --
+        # stop() must remember the request (via _stop_before_launch) and
+        # honor it the instant the process is registered, instead of
+        # silently doing nothing because self._proc was still None.
+        popen_called = {"flag": False}
+        allow_popen = {"flag": False}
+
+        def _factory(cmd, **kwargs):
+            popen_called["flag"] = True
+            while not allow_popen["flag"]:
+                time.sleep(0.02)
+
+            class FakeProc:
+                def __init__(self):
+                    self.pid = 4242
+                    self.returncode = None
+                    self.stdout = iter(())
+
+                def wait(self):
+                    self.returncode = 1
+                    return self.returncode
+
+                def poll(self):
+                    return self.returncode
+
+            return FakeProc()
+
+        with patch("runner_app.suite_worker.subprocess.Popen", side_effect=_factory), \
+                patch("runner_app.suite_worker.subprocess.run") as mock_run:
+            worker = SuiteRunWorker(repo_root=self.tmpdir)
+            worker.start(["test_cases/a.csv"], 0, 5, 0, os.path.join(self.tmpdir, "r4"))
+            # Wait until the worker thread is inside Popen() (so is_running()
+            # is true via _starting) but hasn't returned a process yet.
+            deadline = time.time() + 2
+            while time.time() < deadline and not popen_called["flag"]:
+                time.sleep(0.02)
+            self.assertTrue(worker.is_running())
+            worker.stop()  # proc is still None here -- must not be a no-op
+            allow_popen["flag"] = True  # let Popen "return" the FakeProc now
+            events = self._drain(worker, {SuiteRunEvent.CANCELLED, SuiteRunEvent.DONE})
+
+        self.assertEqual(events[-1].kind, SuiteRunEvent.CANCELLED)
+        mock_run.assert_called_once()
+        killed_cmd = mock_run.call_args[0][0]
+        self.assertIn("taskkill", killed_cmd)
+        self.assertIn("4242", [str(a) for a in killed_cmd])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -46,6 +46,7 @@ class SuiteRunWorker:
         self._proc = None
         self._starting = False
         self._stop_requested = False
+        self._stop_before_launch = False
 
     def is_running(self):
         with self._lock:
@@ -61,6 +62,7 @@ class SuiteRunWorker:
                 return False
             self._starting = True
             self._stop_requested = False
+            self._stop_before_launch = False
         thread = threading.Thread(
             target=self._run,
             args=(list(spec_paths), max_retries, case_timeout_min, suite_timeout_min, report_dir),
@@ -70,10 +72,22 @@ class SuiteRunWorker:
         return True
 
     def stop(self):
-        """Kill the in-flight `run_suite.py` process tree, if any."""
+        """Kill the in-flight `run_suite.py` process tree, if any.
+
+        If `start()` has returned but the child `Popen()` call inside
+        `_run()` hasn't registered `self._proc` yet, remember the request
+        via `_stop_before_launch` so `_run()` kills it the instant it's
+        registered, instead of silently doing nothing (mirrors
+        `RunWorker.stop_current()`'s `_stop_before_launch_spec` handling
+        of the same race).
+        """
         with self._lock:
             proc = self._proc
-            if proc is None or proc.poll() is not None:
+            if proc is None:
+                if self._starting:
+                    self._stop_before_launch = True
+                return
+            if proc.poll() is not None:
                 return
             self._stop_requested = True
         self._terminate(proc)
@@ -112,9 +126,16 @@ class SuiteRunWorker:
                 cmd, cwd=self.repo_root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding="utf-8", errors="replace", bufsize=1, env=env,
             )
+            pending_stop = False
             with self._lock:
                 self._proc = proc
                 self._starting = False
+                if self._stop_before_launch:
+                    self._stop_before_launch = False
+                    self._stop_requested = True
+                    pending_stop = True
+            if pending_stop:
+                self._terminate(proc)
             for line in proc.stdout:
                 self.events.put(SuiteRunEvent(SuiteRunEvent.OUTPUT, line=line))
             proc.wait()
@@ -127,6 +148,7 @@ class SuiteRunWorker:
             with self._lock:
                 was_stopped = self._stop_requested
                 self._stop_requested = False
+                self._stop_before_launch = False
                 self._proc = None
                 self._starting = False
 

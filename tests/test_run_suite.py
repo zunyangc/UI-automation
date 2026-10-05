@@ -111,6 +111,27 @@ class ResolveSpecsTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             run_suite.parse_args([])
 
+    def test_negative_max_retries_errors(self):
+        with self.assertRaises(SystemExit):
+            run_suite.parse_args(["test_cases/a.csv", "--max-retries", "-1"])
+
+    def test_zero_case_timeout_errors(self):
+        with self.assertRaises(SystemExit):
+            run_suite.parse_args(["test_cases/a.csv", "--case-timeout-min", "0"])
+
+    def test_negative_case_timeout_errors(self):
+        with self.assertRaises(SystemExit):
+            run_suite.parse_args(["test_cases/a.csv", "--case-timeout-min", "-5"])
+
+    def test_negative_suite_timeout_errors(self):
+        with self.assertRaises(SystemExit):
+            run_suite.parse_args(["test_cases/a.csv", "--suite-timeout-min", "-1"])
+
+    def test_zero_suite_timeout_is_allowed(self):
+        # 0 is the documented "disabled" sentinel, not an error.
+        args = run_suite.parse_args(["test_cases/a.csv", "--suite-timeout-min", "0"])
+        self.assertEqual(args.suite_timeout_min, 0)
+
 
 class RunLoopTests(unittest.TestCase):
     """Exercise main()'s round/retry loop with a fake run_one_attempt so no
@@ -236,6 +257,44 @@ class RunLoopTests(unittest.TestCase):
         statuses = {c["name"]: c["final_status"] for c in summary["cases"]}
         self.assertEqual(statuses["a"], "retries_exhausted")
         self.assertEqual(statuses["b"], "not_run_timeout")
+
+    def test_in_flight_attempt_timeout_is_capped_to_remaining_suite_budget(self):
+        # A single case, 50 min case-timeout, but only ~10 min (600s) left
+        # on the suite clock by the time the attempt is about to start --
+        # run_one_attempt must be given the smaller remaining-budget value,
+        # not the full --case-timeout-min, so it can't run past the
+        # advertised overall suite deadline.
+        seen_timeouts = []
+
+        def fake_run_one_attempt(spec, attempt_no, case_timeout_min, quiet, no_cleanup, results_dir):
+            seen_timeouts.append(case_timeout_min)
+            return make_attempt(spec, attempt_no, "pass")
+
+        argv = [
+            "test_cases/a.csv", "--report-dir", self.report_dir,
+            "--case-timeout-min", "50", "--suite-timeout-min", "10",
+        ]
+        # monotonic() calls: suite start (0), while-loop deadline check
+        # (60s elapsed), per-spec deadline check (60s elapsed) -- deadline
+        # is 10*60=600s, so 600-60=540s=9min remain, less than the
+        # configured 50 min case timeout.
+        with patch.object(run_suite, "run_one_attempt", side_effect=fake_run_one_attempt), \
+                patch.object(run_suite.time, "monotonic", side_effect=[0, 60, 60]):
+            rc = run_suite.main(argv)
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(seen_timeouts), 1)
+        self.assertLess(seen_timeouts[0], 50)
+        self.assertAlmostEqual(seen_timeouts[0], 9.0, places=6)
+
+    def test_report_write_failure_returns_exit_code_2(self):
+        def fake_run_one_attempt(spec, attempt_no, case_timeout_min, quiet, no_cleanup, results_dir):
+            return make_attempt(spec, attempt_no, "pass")
+
+        argv = ["test_cases/a.csv", "--report-dir", self.report_dir]
+        with patch.object(run_suite, "run_one_attempt", side_effect=fake_run_one_attempt), \
+                patch.object(run_suite, "write_report", side_effect=OSError("disk full")):
+            rc = run_suite.main(argv)
+        self.assertEqual(rc, 2)
 
 
 if __name__ == "__main__":

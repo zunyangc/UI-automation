@@ -72,8 +72,9 @@ def parse_args(argv=None):
                      help=f"hard per-attempt wall-clock cap in minutes "
                           f"(default: {DEFAULT_CASE_TIMEOUT_MIN})")
     ap.add_argument("--suite-timeout-min", type=float, default=DEFAULT_SUITE_TIMEOUT_MIN,
-                     help="hard cap for the whole invocation in minutes; 0 disables it "
-                          "(default: 0)")
+                     help="hard cap for the whole invocation in minutes; 0 disables it. "
+                          "An in-flight attempt is capped to whatever time remains so it "
+                          "can't run past this deadline (default: 0)")
     ap.add_argument("--no-cleanup", action="store_true",
                      help="pass --no-cleanup through to every run.ps1 invocation")
     ap.add_argument("--report-dir", default=None,
@@ -84,6 +85,12 @@ def parse_args(argv=None):
     a = ap.parse_args(argv)
     if not a.all and not a.specs:
         ap.error("provide at least one spec path, or pass --all")
+    if a.max_retries < 0:
+        ap.error("--max-retries must be >= 0")
+    if a.case_timeout_min <= 0:
+        ap.error("--case-timeout-min must be > 0")
+    if a.suite_timeout_min < 0:
+        ap.error("--suite-timeout-min must be >= 0")
     return a
 
 
@@ -376,7 +383,8 @@ def main(argv=None):
     round_no = 1
 
     while pending:
-        if suite_deadline and time.monotonic() >= suite_deadline:
+        now = time.monotonic()
+        if suite_deadline and now >= suite_deadline:
             for s in pending:
                 terminal[s] = "not_run_timeout"
             pending = []
@@ -384,12 +392,23 @@ def main(argv=None):
         print(f"\n=== Round {round_no}: {len(pending)} case(s) ===")
         still_pending = []
         for spec in pending:
-            if suite_deadline and time.monotonic() >= suite_deadline:
+            now = time.monotonic()
+            if suite_deadline and now >= suite_deadline:
                 terminal[spec] = "not_run_timeout"
                 continue
+            # Cap this attempt's own timeout to whatever's left of the
+            # suite deadline (reusing the `now` just sampled above) so a
+            # case that starts late can't run past the advertised overall
+            # suite timeout -- checking the deadline only *between* cases
+            # isn't enough, since run_one_attempt() would otherwise still
+            # be given the full --case-timeout-min budget.
+            if suite_deadline is not None:
+                case_timeout_min = min(args.case_timeout_min, (suite_deadline - now) / 60.0)
+            else:
+                case_timeout_min = args.case_timeout_min
             attempt_no = len(history[spec]) + 1
             attempt = run_one_attempt(
-                spec, attempt_no, args.case_timeout_min, args.quiet,
+                spec, attempt_no, case_timeout_min, args.quiet,
                 args.no_cleanup, results_dir,
             )
             history[spec].append(attempt)
@@ -408,9 +427,13 @@ def main(argv=None):
         round_no += 1
 
     suite_ended_at = datetime.datetime.now(datetime.timezone.utc)
-    summary_path, report_path, zip_path = write_report(
-        specs, history, terminal, report_dir, suite_started_at, suite_ended_at,
-    )
+    try:
+        summary_path, report_path, zip_path = write_report(
+            specs, history, terminal, report_dir, suite_started_at, suite_ended_at,
+        )
+    except (OSError, ValueError) as e:
+        print(f"error: failed to write suite report under {report_dir}: {e}", file=sys.stderr)
+        return 2
 
     print(f"\n=== Suite finished: {suite_ended_at - suite_started_at} ===")
     for spec in specs:
