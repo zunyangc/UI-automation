@@ -141,6 +141,108 @@ class RunTabSuiteIntegrationTests(unittest.TestCase):
         self.assertEqual(str(tab.btn_run_selected["state"]), "normal")
         self.assertFalse(tab._suite_running)
 
+    def test_handle_suite_event_round_started_sets_pending_to_queued_without_resetting_settled(self):
+        tc_a = FakeTestCase("/abs/a.csv", "test_cases/a.csv")
+        tc_b = FakeTestCase("/abs/b.csv", "test_cases/b.csv")
+        tab = self._make_tab([tc_a, tc_b], suite_worker=MagicMock())
+        tab.rows[tc_a.path].set_status("pass")  # already settled in an earlier round
+
+        tab.handle_suite_event(SuiteRunEvent(
+            SuiteRunEvent.ROUND_STARTED, round=2, pending=["test_cases/b.csv"],
+        ))
+
+        self.assertEqual(tab.rows[tc_a.path].status_label.cget("text"), "pass")
+        self.assertEqual(tab.rows[tc_b.path].status_label.cget("text"), "queued")
+
+    def test_handle_suite_event_case_running_sets_row_running(self):
+        tc = FakeTestCase("/abs/a.csv", "test_cases/a.csv")
+        tab = self._make_tab([tc], suite_worker=MagicMock())
+
+        tab.handle_suite_event(SuiteRunEvent(
+            SuiteRunEvent.CASE_RUNNING, spec="test_cases/a.csv", attempt_no=1,
+        ))
+
+        self.assertEqual(tab.rows[tc.path].status_label.cget("text"), "running")
+
+    def test_handle_suite_event_case_attempt_done_non_pass_sets_retrying(self):
+        tc = FakeTestCase("/abs/a.csv", "test_cases/a.csv")
+        tab = self._make_tab([tc], suite_worker=MagicMock())
+        tab.rows[tc.path].set_status("running")
+
+        tab.handle_suite_event(SuiteRunEvent(
+            SuiteRunEvent.CASE_ATTEMPT_DONE, spec="test_cases/a.csv", attempt_no=1, status="fail",
+        ))
+
+        self.assertEqual(tab.rows[tc.path].status_label.cget("text"), "retrying")
+
+    def test_handle_suite_event_case_attempt_done_pass_does_not_set_retrying(self):
+        tc = FakeTestCase("/abs/a.csv", "test_cases/a.csv")
+        tab = self._make_tab([tc], suite_worker=MagicMock())
+        tab.rows[tc.path].set_status("running")
+
+        tab.handle_suite_event(SuiteRunEvent(
+            SuiteRunEvent.CASE_ATTEMPT_DONE, spec="test_cases/a.csv", attempt_no=1, status="pass",
+        ))
+
+        self.assertEqual(tab.rows[tc.path].status_label.cget("text"), "running")
+
+    def test_handle_suite_event_case_final_sets_terminal_status(self):
+        tc = FakeTestCase("/abs/a.csv", "test_cases/a.csv")
+        tab = self._make_tab([tc], suite_worker=MagicMock())
+        tab.rows[tc.path].set_status("retrying")
+
+        tab.handle_suite_event(SuiteRunEvent(
+            SuiteRunEvent.CASE_FINAL, spec="test_cases/a.csv", final_status="stuck",
+        ))
+
+        self.assertEqual(tab.rows[tc.path].status_label.cget("text"), "stuck")
+
+    def test_live_round_events_end_to_end_then_final_sweep_matches(self):
+        # Simulate a full 2-round suite run purely through handle_suite_event
+        # calls (as SuiteRunWorker would post them), then confirm the final
+        # DONE summary sweep doesn't contradict what live events already set.
+        tc_a = FakeTestCase("/abs/a.csv", "test_cases/a.csv")
+        tc_b = FakeTestCase("/abs/b.csv", "test_cases/b.csv")
+        tab = self._make_tab([tc_a, tc_b], suite_worker=MagicMock())
+        tab._suite_running = True
+
+        events = [
+            SuiteRunEvent(SuiteRunEvent.ROUND_STARTED, round=1,
+                          pending=["test_cases/a.csv", "test_cases/b.csv"]),
+            SuiteRunEvent(SuiteRunEvent.CASE_RUNNING, spec="test_cases/a.csv", attempt_no=1),
+            SuiteRunEvent(SuiteRunEvent.CASE_ATTEMPT_DONE, spec="test_cases/a.csv",
+                          attempt_no=1, status="pass"),
+            SuiteRunEvent(SuiteRunEvent.CASE_FINAL, spec="test_cases/a.csv", final_status="pass"),
+            SuiteRunEvent(SuiteRunEvent.CASE_RUNNING, spec="test_cases/b.csv", attempt_no=1),
+            SuiteRunEvent(SuiteRunEvent.CASE_ATTEMPT_DONE, spec="test_cases/b.csv",
+                          attempt_no=1, status="fail"),
+            SuiteRunEvent(SuiteRunEvent.ROUND_STARTED, round=2, pending=["test_cases/b.csv"]),
+            SuiteRunEvent(SuiteRunEvent.CASE_RUNNING, spec="test_cases/b.csv", attempt_no=2),
+            SuiteRunEvent(SuiteRunEvent.CASE_ATTEMPT_DONE, spec="test_cases/b.csv",
+                          attempt_no=2, status="fail"),
+            SuiteRunEvent(SuiteRunEvent.CASE_FINAL, spec="test_cases/b.csv", final_status="stuck"),
+        ]
+        for event in events:
+            tab.handle_suite_event(event)
+        # "a" settled pass in round 1 -- round 2's ROUND_STARTED (pending
+        # only lists "b") must not have reset it back to queued.
+        self.assertEqual(tab.rows[tc_a.path].status_label.cget("text"), "pass")
+        self.assertEqual(tab.rows[tc_b.path].status_label.cget("text"), "stuck")
+
+        summary = {
+            "counts": {"pass": 1, "stuck": 1},
+            "cases": [
+                {"spec": "test_cases/a.csv", "final_status": "pass"},
+                {"spec": "test_cases/b.csv", "final_status": "stuck"},
+            ],
+        }
+        tab.handle_suite_event(SuiteRunEvent(
+            SuiteRunEvent.DONE, report_dir="result/x",
+            report_path="result/x/report.html", summary=summary,
+        ))
+        self.assertEqual(tab.rows[tc_a.path].status_label.cget("text"), "pass")
+        self.assertEqual(tab.rows[tc_b.path].status_label.cget("text"), "stuck")
+
     def test_handle_suite_event_applies_final_status_to_rows(self):
         tc_a = FakeTestCase("/abs/a.csv", "test_cases/a.csv")
         tc_b = FakeTestCase("/abs/b.csv", "test_cases/b.csv")

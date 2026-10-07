@@ -78,6 +78,11 @@ STATUS_COLOR = {
     "retries_exhausted": "#d93025",
     "timeout": "#e37400",
     "not_run_timeout": "#e37400",
+    # Live, in-flight Run Suite (Auto-Retry) states -- a case has failed its
+    # current attempt but hasn't been given a terminal status yet (another
+    # round will retry it), distinct from the settled "fail"/"error" colors
+    # above. See RunTab.handle_suite_event's CASE_ATTEMPT_DONE handling.
+    "retrying": "#e37400",
 }
 
 # Default suite-run options shown in the "Suite Options..." dialog --
@@ -483,6 +488,39 @@ class RunTab(ttk.Frame):
             return
         if event.kind == SuiteRunEvent.OUTPUT:
             self._append_log(event.data.get("line", ""))
+            return
+        if event.kind == SuiteRunEvent.ROUND_STARTED:
+            # Only the cases still eligible for another attempt go back to
+            # "queued" -- cases that already settled (pass/stuck/retries
+            # exhausted) in an earlier round keep their final status/color
+            # instead of being reset, so the pill always shows "still being
+            # retried" vs. "already done".
+            for rel in event.data.get("pending", []):
+                tc = self._rel_to_tc.get(rel)
+                if tc is not None and tc.path in self.rows:
+                    self.rows[tc.path].set_status("queued")
+            return
+        if event.kind == SuiteRunEvent.CASE_RUNNING:
+            tc = self._rel_to_tc.get(event.data.get("spec"))
+            if tc is not None and tc.path in self.rows:
+                self.rows[tc.path].set_status("running")
+            return
+        if event.kind == SuiteRunEvent.CASE_ATTEMPT_DONE:
+            # A non-pass attempt only means "retrying" here -- the
+            # subsequent CASE_FINAL event (if any) overrides this with the
+            # real terminal status (stuck/retries_exhausted/etc.); if the
+            # case is going to be retried instead, it stays "retrying"
+            # until its next CASE_RUNNING flips it back to "running".
+            status = event.data.get("status")
+            if status != "pass":
+                tc = self._rel_to_tc.get(event.data.get("spec"))
+                if tc is not None and tc.path in self.rows:
+                    self.rows[tc.path].set_status("retrying")
+            return
+        if event.kind == SuiteRunEvent.CASE_FINAL:
+            tc = self._rel_to_tc.get(event.data.get("spec"))
+            if tc is not None and tc.path in self.rows:
+                self.rows[tc.path].set_status(event.data.get("final_status", "error"))
             return
         # DONE / CANCELLED: apply each case's final status from
         # summary.json (if it was written) and release the mutual-

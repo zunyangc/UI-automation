@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
-from runner_app.suite_worker import SuiteRunEvent, SuiteRunWorker  # noqa: E402
+from runner_app.suite_worker import SuiteRunEvent, SuiteRunWorker, _parse_event_line  # noqa: E402
 
 
 def make_fake_popen(exit_code=0, stdout_lines=("ok\n",)):
@@ -244,6 +244,104 @@ class SuiteRunWorkerTests(unittest.TestCase):
         killed_cmd = mock_run.call_args[0][0]
         self.assertIn("taskkill", killed_cmd)
         self.assertIn("4242", [str(a) for a in killed_cmd])
+
+
+class ParseEventLineTests(unittest.TestCase):
+    """`_parse_event_line` turns one of run_suite.py's
+    `##SUITE-EVENT## {json}` lines into a `SuiteRunEvent`, or `None` if the
+    line isn't one (plain log output, malformed JSON, unknown type) -- the
+    caller then falls back to forwarding it as a plain OUTPUT line instead
+    of crashing or dropping it silently.
+    """
+
+    def test_round_started_line_is_parsed(self):
+        line = '##SUITE-EVENT## {"type": "round_started", "round": 2, "pending": ["a.csv", "b.csv"]}\n'
+        event = _parse_event_line(line)
+        self.assertEqual(event.kind, SuiteRunEvent.ROUND_STARTED)
+        self.assertEqual(event.data, {"round": 2, "pending": ["a.csv", "b.csv"]})
+
+    def test_attempt_started_line_is_parsed(self):
+        line = '##SUITE-EVENT## {"type": "attempt_started", "spec": "a.csv", "attempt_no": 3}'
+        event = _parse_event_line(line)
+        self.assertEqual(event.kind, SuiteRunEvent.CASE_RUNNING)
+        self.assertEqual(event.data, {"spec": "a.csv", "attempt_no": 3})
+
+    def test_attempt_done_line_is_parsed(self):
+        line = '##SUITE-EVENT## {"type": "attempt_done", "spec": "a.csv", "attempt_no": 1, "status": "fail"}'
+        event = _parse_event_line(line)
+        self.assertEqual(event.kind, SuiteRunEvent.CASE_ATTEMPT_DONE)
+        self.assertEqual(event.data, {"spec": "a.csv", "attempt_no": 1, "status": "fail"})
+
+    def test_case_final_line_is_parsed(self):
+        line = '##SUITE-EVENT## {"type": "case_final", "spec": "a.csv", "final_status": "stuck"}'
+        event = _parse_event_line(line)
+        self.assertEqual(event.kind, SuiteRunEvent.CASE_FINAL)
+        self.assertEqual(event.data, {"spec": "a.csv", "final_status": "stuck"})
+
+    def test_plain_log_line_is_not_an_event(self):
+        self.assertIsNone(_parse_event_line("--- [a] attempt 1 ---\n"))
+
+    def test_malformed_json_after_prefix_is_not_an_event(self):
+        self.assertIsNone(_parse_event_line("##SUITE-EVENT## {not valid json"))
+
+    def test_unknown_event_type_is_not_an_event(self):
+        self.assertIsNone(_parse_event_line('##SUITE-EVENT## {"type": "something_new", "x": 1}'))
+
+
+class SuiteRunWorkerStructuredEventStreamingTests(unittest.TestCase):
+    """End-to-end (through SuiteRunWorker._run) check that structured
+    event lines are posted as their parsed kind -- not as plain OUTPUT --
+    while ordinary log lines still flow through as OUTPUT untouched.
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+
+    def _drain(self, worker, kinds, timeout=5):
+        collected = []
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                event = worker.events.get(timeout=0.2)
+            except Exception:
+                continue
+            collected.append(event)
+            if event.kind in kinds:
+                break
+        return collected
+
+    def test_structured_lines_become_typed_events_plain_lines_stay_output(self):
+        stdout_lines = (
+            "\n=== Round 1: 1 case(s) ===\n",
+            '##SUITE-EVENT## {"type": "round_started", "round": 1, "pending": ["a.csv"]}\n',
+            '##SUITE-EVENT## {"type": "attempt_started", "spec": "a.csv", "attempt_no": 1}\n',
+            "    some case output\n",
+            '##SUITE-EVENT## {"type": "attempt_done", "spec": "a.csv", "attempt_no": 1, "status": "pass"}\n',
+            '##SUITE-EVENT## {"type": "case_final", "spec": "a.csv", "final_status": "pass"}\n',
+        )
+        fake_popen = make_fake_popen(exit_code=0, stdout_lines=stdout_lines)
+        report_dir = os.path.join(self.tmpdir, "report")
+        with patch("runner_app.suite_worker.subprocess.Popen", side_effect=fake_popen):
+            worker = SuiteRunWorker(repo_root=self.tmpdir)
+            worker.start(["a.csv"], 0, 5, 0, report_dir)
+            events = self._drain(worker, {SuiteRunEvent.DONE})
+
+        kinds = [e.kind for e in events]
+        self.assertEqual(kinds, [
+            SuiteRunEvent.STARTED,
+            SuiteRunEvent.OUTPUT,  # "=== Round 1: ... ==="
+            SuiteRunEvent.ROUND_STARTED,
+            SuiteRunEvent.CASE_RUNNING,
+            SuiteRunEvent.OUTPUT,  # "    some case output"
+            SuiteRunEvent.CASE_ATTEMPT_DONE,
+            SuiteRunEvent.CASE_FINAL,
+            SuiteRunEvent.DONE,
+        ])
+        round_started = events[2]
+        self.assertEqual(round_started.data, {"round": 1, "pending": ["a.csv"]})
+        case_final = events[6]
+        self.assertEqual(case_final.data, {"spec": "a.csv", "final_status": "pass"})
 
 
 if __name__ == "__main__":

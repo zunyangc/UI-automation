@@ -2,7 +2,10 @@
 resolution. `run_one_attempt` is monkeypatched throughout -- these tests
 never invoke a real `run.ps1`/PowerShell process.
 """
+import contextlib
 import datetime
+import io
+import json
 import os
 import shutil
 import sys
@@ -295,6 +298,118 @@ class RunLoopTests(unittest.TestCase):
                 patch.object(run_suite, "write_report", side_effect=OSError("disk full")):
             rc = run_suite.main(argv)
         self.assertEqual(rc, 2)
+
+
+class SuiteEventTests(unittest.TestCase):
+    """`##SUITE-EVENT## {json}` lines are the machine-readable progress
+    protocol `runner_app/suite_worker.py` parses for live GUI status (see
+    RUN-SUITE-LIVE-STATUS-SPEC.md) -- these tests assert the right events
+    fire, in order, for each round/retry outcome, without touching the GUI.
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        self.report_dir = os.path.join(self.tmpdir, "report")
+
+    def _run_and_capture_events(self, specs, attempt_sequences, **extra_args):
+        calls = {s: 0 for s in specs}
+
+        def fake_run_one_attempt(spec, attempt_no, case_timeout_min, quiet, no_cleanup, results_dir):
+            idx = calls[spec]
+            calls[spec] += 1
+            status = attempt_sequences[spec][idx]
+            variant = chr(ord("A") + idx)
+            return make_attempt(spec, attempt_no, status, "step_1", f"boom-{status}-{variant}")
+
+        argv = list(specs) + ["--report-dir", self.report_dir]
+        for k, v in extra_args.items():
+            argv += [f"--{k.replace('_', '-')}", str(v)]
+        buf = io.StringIO()
+        with patch.object(run_suite, "run_one_attempt", side_effect=fake_run_one_attempt), \
+                contextlib.redirect_stdout(buf):
+            rc = run_suite.main(argv)
+        events = []
+        for line in buf.getvalue().splitlines():
+            if line.startswith(run_suite._EVENT_PREFIX):
+                events.append(json.loads(line[len(run_suite._EVENT_PREFIX):]))
+        return rc, events
+
+    def test_pass_on_first_try_emits_round_attempt_and_final_events(self):
+        rc, events = self._run_and_capture_events(
+            ["test_cases/a.csv"], {"test_cases/a.csv": ["pass"]},
+        )
+        self.assertEqual(rc, 0)
+        self.assertEqual(events, [
+            {"type": "round_started", "round": 1, "pending": ["test_cases/a.csv"]},
+            {"type": "attempt_started", "spec": "test_cases/a.csv", "attempt_no": 1},
+            {"type": "attempt_done", "spec": "test_cases/a.csv", "attempt_no": 1, "status": "pass"},
+            {"type": "case_final", "spec": "test_cases/a.csv", "final_status": "pass"},
+        ])
+
+    def test_retry_then_pass_spans_two_rounds(self):
+        rc, events = self._run_and_capture_events(
+            ["test_cases/a.csv"], {"test_cases/a.csv": ["fail", "pass"]}, max_retries=1,
+        )
+        self.assertEqual(rc, 0)
+        types_and_rounds = [(e["type"], e.get("round")) for e in events]
+        self.assertEqual(types_and_rounds, [
+            ("round_started", 1),
+            ("attempt_started", None),
+            ("attempt_done", None),
+            ("round_started", 2),
+            ("attempt_started", None),
+            ("attempt_done", None),
+            ("case_final", None),
+        ])
+        # The failing first attempt never gets its own case_final -- only
+        # a settled outcome (pass/stuck/retries_exhausted/timeout) does.
+        self.assertEqual(
+            [e for e in events if e["type"] == "case_final"],
+            [{"type": "case_final", "spec": "test_cases/a.csv", "final_status": "pass"}],
+        )
+
+    def test_retries_exhausted_emits_matching_final_event(self):
+        def fake_run_one_attempt(spec, attempt_no, case_timeout_min, quiet, no_cleanup, results_dir):
+            variant = chr(ord("A") + attempt_no)
+            return make_attempt(spec, attempt_no, "fail", "step_1", f"boom-{variant}")
+
+        argv = ["test_cases/a.csv", "--report-dir", self.report_dir, "--max-retries", "1"]
+        buf = io.StringIO()
+        with patch.object(run_suite, "run_one_attempt", side_effect=fake_run_one_attempt), \
+                contextlib.redirect_stdout(buf):
+            rc = run_suite.main(argv)
+        self.assertEqual(rc, 1)
+        events = [
+            json.loads(line[len(run_suite._EVENT_PREFIX):])
+            for line in buf.getvalue().splitlines() if line.startswith(run_suite._EVENT_PREFIX)
+        ]
+        finals = [e for e in events if e["type"] == "case_final"]
+        self.assertEqual(finals, [
+            {"type": "case_final", "spec": "test_cases/a.csv", "final_status": "retries_exhausted"},
+        ])
+
+    def test_suite_timeout_emits_not_run_timeout_final_event(self):
+        def fake_run_one_attempt(spec, attempt_no, case_timeout_min, quiet, no_cleanup, results_dir):
+            return make_attempt(spec, attempt_no, "fail", "step_1", "boom")
+
+        argv = [
+            "test_cases/a.csv", "test_cases/b.csv",
+            "--report-dir", self.report_dir, "--suite-timeout-min", "1", "--max-retries", "0",
+        ]
+        buf = io.StringIO()
+        with patch.object(run_suite, "run_one_attempt", side_effect=fake_run_one_attempt), \
+                patch.object(run_suite.time, "monotonic", side_effect=[0, 0, 0, 1000]), \
+                contextlib.redirect_stdout(buf):
+            rc = run_suite.main(argv)
+        self.assertEqual(rc, 1)
+        events = [
+            json.loads(line[len(run_suite._EVENT_PREFIX):])
+            for line in buf.getvalue().splitlines() if line.startswith(run_suite._EVENT_PREFIX)
+        ]
+        finals = {e["spec"]: e["final_status"] for e in events if e["type"] == "case_final"}
+        self.assertEqual(finals["test_cases/a.csv"], "retries_exhausted")
+        self.assertEqual(finals["test_cases/b.csv"], "not_run_timeout")
 
 
 if __name__ == "__main__":

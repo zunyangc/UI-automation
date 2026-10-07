@@ -20,6 +20,7 @@ import argparse
 import datetime
 import glob
 import html
+import json
 import os
 import re
 import subprocess
@@ -35,6 +36,24 @@ from runner_app import results_store  # noqa: E402
 _SCREENSHOT_DIR_RE = re.compile(r"^screenshot_dir:\s*(.+)$", re.MULTILINE)
 
 _DIGITS_RE = re.compile(r"\d+")
+
+# Prefix for machine-readable progress lines, interleaved with the normal
+# human-readable print()s below. A GUI consumer (runner_app/suite_worker.py)
+# can key off this prefix to get live per-case/per-round status without any
+# of the fragile regex-matching of the human-readable messages -- those stay
+# unchanged for CLI users. See RUN-SUITE-LIVE-STATUS-SPEC.md.
+_EVENT_PREFIX = "##SUITE-EVENT## "
+
+
+def _emit_event(event_type, **data):
+    """Print one machine-readable progress line for GUI consumption.
+
+    Kept to primitive JSON-serializable data (strings/ints/lists) -- see
+    call sites below. Flushed explicitly since stdout may be block-buffered
+    when piped to a subprocess (matches the `PYTHONUNBUFFERED=1` env the GUI
+    worker already sets, but doesn't rely on it).
+    """
+    print(_EVENT_PREFIX + json.dumps({"type": event_type, **data}), flush=True)
 
 DEFAULT_MAX_RETRIES = 2
 DEFAULT_CASE_TIMEOUT_MIN = 35
@@ -282,7 +301,6 @@ def write_report(specs, history, terminal, report_dir, suite_started_at, suite_e
         "cases": cases,
     }
 
-    import json
     summary_path = os.path.join(report_dir, "summary.json")
     with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
@@ -387,14 +405,17 @@ def main(argv=None):
         if suite_deadline and now >= suite_deadline:
             for s in pending:
                 terminal[s] = "not_run_timeout"
+                _emit_event("case_final", spec=s, final_status="not_run_timeout")
             pending = []
             break
         print(f"\n=== Round {round_no}: {len(pending)} case(s) ===")
+        _emit_event("round_started", round=round_no, pending=list(pending))
         still_pending = []
         for spec in pending:
             now = time.monotonic()
             if suite_deadline and now >= suite_deadline:
                 terminal[spec] = "not_run_timeout"
+                _emit_event("case_final", spec=spec, final_status="not_run_timeout")
                 continue
             # Cap this attempt's own timeout to whatever's left of the
             # suite deadline (reusing the `now` just sampled above) so a
@@ -407,20 +428,27 @@ def main(argv=None):
             else:
                 case_timeout_min = args.case_timeout_min
             attempt_no = len(history[spec]) + 1
+            _emit_event("attempt_started", spec=spec, attempt_no=attempt_no)
             attempt = run_one_attempt(
                 spec, attempt_no, case_timeout_min, args.quiet,
                 args.no_cleanup, results_dir,
             )
             history[spec].append(attempt)
+            _emit_event(
+                "attempt_done", spec=spec, attempt_no=attempt_no, status=attempt["status"],
+            )
             if attempt["status"] == "pass":
                 terminal[spec] = "pass"
+                _emit_event("case_final", spec=spec, final_status="pass")
                 continue
             if is_stuck(history[spec]):
                 terminal[spec] = "stuck"
                 print(f"    [{_case_name(spec)}] stuck -- will not retry further")
+                _emit_event("case_final", spec=spec, final_status="stuck")
                 continue
             if len(history[spec]) >= args.max_retries + 1:
                 terminal[spec] = "retries_exhausted"
+                _emit_event("case_final", spec=spec, final_status="retries_exhausted")
                 continue
             still_pending.append(spec)
         pending = still_pending
