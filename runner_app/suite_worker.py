@@ -56,21 +56,27 @@ _EVENT_TYPE_TO_KIND = {
 
 def _parse_event_line(line):
     """Parse one `##SUITE-EVENT## {json}` line into a `SuiteRunEvent`, or
-    return `None` if the line doesn't carry the prefix, isn't valid JSON, or
-    has an unrecognized "type" -- any of which falls back to being forwarded
-    as a plain `OUTPUT` line instead of being dropped silently or crashing
-    the worker thread.
+    return `None` if the line doesn't carry the prefix, isn't valid JSON,
+    isn't a JSON object (e.g. a bare `null`/number/list), has an
+    unrecognized/missing "type", or has a payload that otherwise can't
+    construct a `SuiteRunEvent` (e.g. a stray top-level "kind" key colliding
+    with the constructor's own `kind` argument) -- any of which falls back
+    to being forwarded as a plain `OUTPUT` line instead of being dropped
+    silently or raising out of the read loop and killing the rest of the
+    stream.
     """
     stripped = line.strip()
     if not stripped.startswith(_EVENT_PREFIX):
         return None
     try:
         payload = json.loads(stripped[len(_EVENT_PREFIX):])
+        if not isinstance(payload, dict):
+            return None
         event_type = payload.pop("type")
         kind = _EVENT_TYPE_TO_KIND[event_type]
+        return SuiteRunEvent(kind, **payload)
     except (ValueError, KeyError, TypeError):
         return None
-    return SuiteRunEvent(kind, **payload)
 
 
 class SuiteRunWorker:

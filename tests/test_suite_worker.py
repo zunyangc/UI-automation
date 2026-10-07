@@ -16,7 +16,9 @@ from unittest.mock import patch
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
-from runner_app.suite_worker import SuiteRunEvent, SuiteRunWorker, _parse_event_line  # noqa: E402
+from runner_app.suite_worker import (  # noqa: E402
+    SuiteRunEvent, SuiteRunWorker, _EVENT_PREFIX, _parse_event_line,
+)
 
 
 def make_fake_popen(exit_code=0, stdout_lines=("ok\n",)):
@@ -287,6 +289,22 @@ class ParseEventLineTests(unittest.TestCase):
     def test_unknown_event_type_is_not_an_event(self):
         self.assertIsNone(_parse_event_line('##SUITE-EVENT## {"type": "something_new", "x": 1}'))
 
+    def test_valid_json_scalar_non_object_payload_is_not_an_event(self):
+        # `null`/a bare number/a list are all valid JSON but aren't dicts,
+        # so there's no "type" to look up -- must not raise AttributeError
+        # from calling .pop() on a non-dict.
+        for body in ("null", "42", "[1, 2, 3]", '"a string"'):
+            with self.subTest(body=body):
+                self.assertIsNone(_parse_event_line(f"{_EVENT_PREFIX}{body}"))
+
+    def test_payload_with_top_level_kind_key_is_not_an_event(self):
+        # A payload whose keys collide with SuiteRunEvent.__init__'s own
+        # `kind` positional argument (via **payload) must not raise
+        # TypeError out of _parse_event_line -- that construction happens
+        # inside the guarded try block.
+        line = '##SUITE-EVENT## {"type": "case_final", "kind": "oops", "spec": "a.csv"}'
+        self.assertIsNone(_parse_event_line(line))
+
 
 class SuiteRunWorkerStructuredEventStreamingTests(unittest.TestCase):
     """End-to-end (through SuiteRunWorker._run) check that structured
@@ -342,6 +360,34 @@ class SuiteRunWorkerStructuredEventStreamingTests(unittest.TestCase):
         self.assertEqual(round_started.data, {"round": 1, "pending": ["a.csv"]})
         case_final = events[6]
         self.assertEqual(case_final.data, {"spec": "a.csv", "final_status": "pass"})
+
+    def test_malformed_event_line_mid_stream_does_not_abort_remaining_output(self):
+        # A malformed prefixed line (e.g. a bare JSON `null`, which is
+        # valid JSON but not a dict) must not raise out of the read loop --
+        # it should be forwarded as plain OUTPUT and every later line must
+        # still be processed and reach DONE.
+        stdout_lines = (
+            '##SUITE-EVENT## {"type": "round_started", "round": 1, "pending": ["a.csv"]}\n',
+            "##SUITE-EVENT## null\n",
+            '##SUITE-EVENT## {"type": "case_final", "spec": "a.csv", "final_status": "pass"}\n',
+            "    trailing output after the malformed line\n",
+        )
+        fake_popen = make_fake_popen(exit_code=0, stdout_lines=stdout_lines)
+        report_dir = os.path.join(self.tmpdir, "report2")
+        with patch("runner_app.suite_worker.subprocess.Popen", side_effect=fake_popen):
+            worker = SuiteRunWorker(repo_root=self.tmpdir)
+            worker.start(["a.csv"], 0, 5, 0, report_dir)
+            events = self._drain(worker, {SuiteRunEvent.DONE})
+
+        kinds = [e.kind for e in events]
+        self.assertEqual(kinds, [
+            SuiteRunEvent.STARTED,
+            SuiteRunEvent.ROUND_STARTED,
+            SuiteRunEvent.OUTPUT,  # the malformed "##SUITE-EVENT## null" line
+            SuiteRunEvent.CASE_FINAL,
+            SuiteRunEvent.OUTPUT,  # "    trailing output after the malformed line"
+            SuiteRunEvent.DONE,
+        ])
 
 
 if __name__ == "__main__":
