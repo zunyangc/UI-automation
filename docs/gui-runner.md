@@ -77,10 +77,17 @@ A second row of buttons drives [`run_suite.py`](../run_suite.py) (via
 - **Open Suite Report** opens the most recently completed suite's
   `report.html` in your default browser. It's disabled until a suite run
   finishes with a report on disk.
-- Each case's status pill on the Run tab updates to its *final* status
-  from the suite (`pass`, `fail`, `stuck`, `timeout`, etc.) once the
-  suite finishes -- not after every individual retry attempt, since
-  those intermediate results are visible in the log panel instead.
+- Each case's status pill on the Run tab updates *live* as the suite
+  progresses: `queued` while waiting for its turn in the current round,
+  `running` while its attempt is in flight, `retrying` (amber) if that
+  attempt just failed but another round will try it again, and a settled
+  final color (`pass`, `fail`, `stuck`, `retries_exhausted`, `timeout`,
+  `not_run_timeout`) once that case has no more attempts coming. A case
+  that already settled in an earlier round keeps its final status/color
+  instead of being reset to `queued` when a later round starts for the
+  cases still being retried. The final sweep over `summary.json` once the
+  whole suite finishes is still applied as a safety net, in case any
+  individual progress line was missed.
 - Suite runs write into `result/gui-suite-{timestamp}/` (as opposed to
   the CLI default `result/suite-{timestamp}/`), so it's clear at a
   glance which tool produced a given report folder. Suite runs still

@@ -6,6 +6,7 @@ __pycache__/
 # Run artifacts
 screenshots/
 results/
+result/
 # Chrome remote-debugging profile used by browser_launch.py
 .browser-profile/
 .browser-profile-edge/

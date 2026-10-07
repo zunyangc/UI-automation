@@ -24,10 +24,59 @@ class SuiteRunEvent:
     OUTPUT = "output"
     DONE = "done"
     CANCELLED = "cancelled"
+    # Live per-round/per-case progress, parsed from run_suite.py's
+    # "##SUITE-EVENT## {json}" lines (see _EVENT_PREFIX / _emit_event there
+    # and _parse_event_line below) -- lets the GUI mirror run_suite.py's
+    # internal round/retry loop instead of only learning final per-case
+    # status once the whole process exits. See RUN-SUITE-LIVE-STATUS-SPEC.md.
+    ROUND_STARTED = "round_started"    # data: round, pending (list of specs)
+    CASE_RUNNING = "case_running"      # data: spec, attempt_no
+    CASE_ATTEMPT_DONE = "case_attempt_done"  # data: spec, attempt_no, status
+    CASE_FINAL = "case_final"          # data: spec, final_status
 
     def __init__(self, kind, **data):
         self.kind = kind
         self.data = data
+
+
+# run_suite.py's _EVENT_PREFIX -- kept in sync manually since the two
+# modules aren't otherwise coupled (run_suite.py is launched as a
+# subprocess, not imported).
+_EVENT_PREFIX = "##SUITE-EVENT## "
+
+# Maps run_suite.py's JSON "type" field to the SuiteRunEvent kind the GUI
+# reacts to. "spec"/"final_status"/etc. flow through as-is via **payload.
+_EVENT_TYPE_TO_KIND = {
+    "round_started": SuiteRunEvent.ROUND_STARTED,
+    "attempt_started": SuiteRunEvent.CASE_RUNNING,
+    "attempt_done": SuiteRunEvent.CASE_ATTEMPT_DONE,
+    "case_final": SuiteRunEvent.CASE_FINAL,
+}
+
+
+def _parse_event_line(line):
+    """Parse one `##SUITE-EVENT## {json}` line into a `SuiteRunEvent`, or
+    return `None` if the line doesn't carry the prefix, isn't valid JSON,
+    isn't a JSON object (e.g. a bare `null`/number/list), has an
+    unrecognized/missing "type", or has a payload that otherwise can't
+    construct a `SuiteRunEvent` (e.g. a stray top-level "kind" key colliding
+    with the constructor's own `kind` argument) -- any of which falls back
+    to being forwarded as a plain `OUTPUT` line instead of being dropped
+    silently or raising out of the read loop and killing the rest of the
+    stream.
+    """
+    stripped = line.strip()
+    if not stripped.startswith(_EVENT_PREFIX):
+        return None
+    try:
+        payload = json.loads(stripped[len(_EVENT_PREFIX):])
+        if not isinstance(payload, dict):
+            return None
+        event_type = payload.pop("type")
+        kind = _EVENT_TYPE_TO_KIND[event_type]
+        return SuiteRunEvent(kind, **payload)
+    except (ValueError, KeyError, TypeError):
+        return None
 
 
 class SuiteRunWorker:
@@ -137,7 +186,8 @@ class SuiteRunWorker:
             if pending_stop:
                 self._terminate(proc)
             for line in proc.stdout:
-                self.events.put(SuiteRunEvent(SuiteRunEvent.OUTPUT, line=line))
+                parsed = _parse_event_line(line)
+                self.events.put(parsed if parsed is not None else SuiteRunEvent(SuiteRunEvent.OUTPUT, line=line))
             proc.wait()
             exit_code = proc.returncode
         except Exception as e:
