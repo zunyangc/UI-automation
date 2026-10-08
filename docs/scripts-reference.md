@@ -296,12 +296,10 @@ print_home.py
 Helpers specific to driving Visual Studio dialogs/menus that don't fit the generic `window/`/`uia/` categories.
 
 ### `handle_android_sdk_dialogs.py` — drive the Android SDK install flow
-Opportunistically dismisses the two dialogs VS pops during the MAUI "missing Android SDKs" install flow: `Android SDK - License Agreement` (click `Accept`) and the matching `User Account Control` elevation prompt (click `Yes`). Polls for `--timeout-ms`; if `--vs-hwnd` is given it also scans the Error List for the `missing Android SDKs required for building` warning row and double-clicks it once to kick off the flow. Any SDK-install activity detected extends the deadline by `--post-work-ms` so the download/install has time to finish. The UAC click is paired to a *specific* License Accept rather than gated on mere timing: when the License is accepted, a snapshot of every UAC-titled window already open at that exact moment is persisted (via `--license-state-file`) alongside the timestamp, and a later UAC prompt is only approved if it is both within `UAC_GRACE_SECONDS` AND **not** one of those pre-existing windows -- i.e. it has to be newly created by that specific Accept, not merely coincide with it in time. **CSV callers should always pass `--license-state-file` pointing under that run's own `{artifacts.screenshot_dir}`** rather than relying on the `%LOCALAPPDATA%` default, so a crashed/killed previous run can never leave behind stale state a later run picks up. `--ignore-preexisting-uac` additionally excludes anything already open before this invocation/watcher even started polling (a one-time startup baseline, complementary to the per-accept snapshot above). Always exits 0 (opportunistic safety net).
+Opportunistically dismisses the two dialogs VS pops during the MAUI "missing Android SDKs" install flow: `Android SDK - License Agreement` (click `Accept`) and the matching `User Account Control` elevation prompt (click `Yes`). Matches purely by window title, unconditionally — no state, no correlation to a specific run. Polls for `--timeout-ms`; if `--vs-hwnd` is given it also scans the Error List for the `missing Android SDKs required for building` warning row and double-clicks it once to kick off the flow. Always exits 0 (opportunistic safety net).
 
 ```
 handle_android_sdk_dialogs.py [--vs-hwnd HWND] [--timeout-ms 3000] [--poll-ms 500]
-                               [--post-work-ms 900000] [--license-state-file PATH]
-                               [--ignore-preexisting-uac]
 ```
 
 ### `select_debug_target.py` — pick the Windows debug target
@@ -312,11 +310,10 @@ select_debug_target.py <vs_hwnd> --net-version ".NET 10.0" [--timeout-ms 20000] 
 ```
 
 ### `sdk_dialog_watcher.py` — background Android SDK/UAC dialog watcher
-`start`/`stop` pair for scenarios where the License/UAC dialogs above can appear at any point across many steps, not just at one or two fixed polling points. `start` launches a detached background process that repeatedly calls `handle_android_sdk_dialogs.py`'s own dialog-handling logic every `--poll-ms` (always with its own `--ignore-preexisting-uac` baseline snapshot) until `stop` writes its `--stop-flag` file. `--max-lifetime-ms` (default 2h) is a LAST-RESORT cap, not the primary shutdown path: `start` also drops a `<stop-flag>.active` marker next to the stop-flag, and `run_test.py`'s own `finally` block (which always runs, pass/fail/crash) recursively walks the run's `screenshot_dir` for that marker and calls `stop` automatically -- so a failed/crashed run's watcher normally exits within moments, not after the full cap. Scenarios whose own runtime can legitimately exceed 2h should still pass an explicit, larger `--max-lifetime-ms` as the final line of defense (e.g. against the whole test process being killed outright). Pass `--license-state-file` pointing at a path under the same run's `screenshot_dir`, matching whatever inline `handle_android_sdk_dialogs.py` calls the scenario also makes. Always exits 0; never touches any window other than the two known dialogs.
+`start`/`stop` pair for scenarios where the License/UAC dialogs above can appear at any point across many steps. `start` launches a detached background process that calls `handle_android_sdk_dialogs.py`'s dialog-handling logic every `--poll-ms` until `stop` writes its `--stop-flag` file. No timer, no state — it only ever clicks those two known titles. `start` drops a `<stop-flag>.active` marker so `run_test.py`'s `finally` block can stop it automatically on any run outcome.
 
 ```
 sdk_dialog_watcher.py start --stop-flag PATH [--log-file PATH] [--poll-ms 1000]
-                             [--max-lifetime-ms 7200000] [--license-state-file PATH]
 sdk_dialog_watcher.py stop  --stop-flag PATH [--wait-ms 5000]
 ```
 
