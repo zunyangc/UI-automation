@@ -518,20 +518,25 @@ def stop_background_watchers(ctx):
     try:
         if not os.path.isdir(ctx.shot_dir):
             return
-        for name in os.listdir(ctx.shot_dir):
-            if not name.endswith(".active"):
-                continue
-            stop_flag = os.path.join(ctx.shot_dir, name[: -len(".active")])
-            script = script_path("scripts/vs/sdk_dialog_watcher.py")
-            if not os.path.isfile(script):
-                continue
-            try:
-                subprocess.run([PY, script, "stop", "--stop-flag", stop_flag,
-                                 "--wait-ms", "3000"],
-                               capture_output=True, text=True,
-                               encoding="utf-8", errors="replace")
-            except Exception as e:
-                print(f"    ! could not stop background watcher ({stop_flag}): {e}")
+        script = script_path("scripts/vs/sdk_dialog_watcher.py")
+        if not os.path.isfile(script):
+            return
+        # Walk the full tree (not just immediate children): a caller could
+        # legitimately pass a --stop-flag nested under a subdirectory of
+        # screenshot_dir, and this function's own contract ("anywhere under
+        # ctx.shot_dir") has to actually mean that.
+        for dirpath, _dirnames, filenames in os.walk(ctx.shot_dir):
+            for name in filenames:
+                if not name.endswith(".active"):
+                    continue
+                stop_flag = os.path.join(dirpath, name[: -len(".active")])
+                try:
+                    subprocess.run([PY, script, "stop", "--stop-flag", stop_flag,
+                                     "--wait-ms", "3000"],
+                                   capture_output=True, text=True,
+                                   encoding="utf-8", errors="replace")
+                except Exception as e:
+                    print(f"    ! could not stop background watcher ({stop_flag}): {e}")
     except Exception as e:
         print(f"    ! stop_background_watchers failed (ignored): {e}")
 

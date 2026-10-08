@@ -28,7 +28,7 @@ license Accept clicked, UAC Yes clicked), the poll deadline is extended by
 ``--post-work-ms`` to give the SDK download time to finish before we
 return. Otherwise the initial ``--timeout-ms`` is used unchanged.
 """
-import argparse, os, sys, time
+import argparse, json, os, sys, threading, time
 
 try:
     from pywinauto import Desktop, Application
@@ -61,24 +61,49 @@ WARNING_PHRASE = "missing android sdks required for building"
 # the matching UAC prompt only appears a little later, polled for by either
 # the next inline check or the continuous background watcher (each its own
 # process). A plain in-memory flag would not be visible across that process
-# boundary, so the "last license accept" timestamp is persisted to a small
-# state file instead. CALLERS SHOULD PASS `--license-state-file` POINTING AT
-# A PATH UNDER THAT RUN'S OWN `{artifacts.screenshot_dir}` (every test case
-# gets its own, uniquely-timestamped one) rather than relying on the default
-# below -- a run-scoped path means a crashed/killed previous run can never
-# leave behind a stale "license accepted" timestamp that a later, unrelated
-# run picks up and treats as its own. The default (a single well-known path
-# under %LOCALAPPDATA%, mirroring run_test.py's own single-active-run marker
+# boundary, so the accept event is persisted to a small state file instead.
+# CALLERS SHOULD PASS `--license-state-file` POINTING AT A PATH UNDER THAT
+# RUN'S OWN `{artifacts.screenshot_dir}` (every test case gets its own,
+# uniquely-timestamped one) rather than relying on the default below -- a
+# run-scoped path means a crashed/killed previous run can never leave behind
+# a stale "license accepted" state that a later, unrelated run picks up and
+# treats as its own. The default (a single well-known path under
+# %LOCALAPPDATA%, mirroring run_test.py's own single-active-run marker
 # convention) only exists for ad hoc/manual invocations that don't have a
 # screenshot_dir to put it under.
 #
-# Even with run-scoping, a grace-period match alone can't rule out a UAC
-# prompt that was ALREADY open (for something unrelated, e.g. Windows Update)
-# at the moment a License was accepted -- it would still fall inside the
-# window. `--ignore-preexisting-uac` (used by sdk_dialog_watcher.py, see
-# `list_uac_hwnds()`) closes that gap: anything already on-screen before this
-# invocation started polling can't possibly be a prompt OUR SDK flow is about
-# to trigger, so it's excluded regardless of timing.
+# A plain "accepted N seconds ago" timestamp is NOT enough on its own: it
+# cannot rule out a UAC prompt that was unrelated to our flow but happened to
+# already be on-screen (or appear) somewhere in that window -- including one
+# that predates the License Accept itself (e.g. a stuck Windows Update
+# prompt) or one that opens for a completely different reason a moment
+# later. `--ignore-preexisting-uac` (a one-time startup baseline, see
+# `list_uac_hwnds()`) only covers windows that existed before this
+# invocation/watcher even started polling; it does NOT cover something that
+# opens mid-run, between that baseline and the License Accept. To close that
+# remaining gap, the state file records not just *when* the License was
+# accepted but a snapshot of every UAC-titled window that was ALREADY open
+# at that exact moment (`_mark_license_accepted` calls `list_uac_hwnds()`
+# itself, right as the accept happens). A later UAC window is only ever
+# approved if it is BOTH within `UAC_GRACE_SECONDS` of that specific accept
+# AND not one of the windows present at that moment -- i.e. it has to be
+# newly created by the flow that specific Accept click triggered, not merely
+# coincide with it in time.
+#
+# Known, accepted residual risks (both fail CLOSED -- i.e. worst case is a
+# missed auto-approval that times out and fails the test with a screenshot,
+# never a wrongly-approved unrelated prompt):
+#   * A narrow race between scanning for UAC windows and the License-Accept
+#     click actually landing, within the same poll cycle -- not practically
+#     closable without real OS-level process/ownership introspection, which
+#     isn't feasible given no verified sample of a real Android SDK UAC
+#     dialog's structure was ever captured.
+#   * Windows can recycle HWND values very quickly after a window closes.
+#     If an unrelated window happened to be snapshotted as "preexisting" at
+#     accept time, closes, and the OS immediately reissues that same HWND to
+#     the real SDK-install UAC prompt, the (coincidental) match means that
+#     prompt is treated as preexisting and denied -- the test fails/times
+#     out rather than silently mis-approving anything.
 UAC_GRACE_SECONDS = 60
 
 
@@ -93,20 +118,84 @@ def _default_license_state_file():
 
 
 def _mark_license_accepted(state_file):
+    """Persist the moment of a License Accept, plus every UAC-titled window
+    already on-screen at that exact moment (see module-level comment above
+    `UAC_GRACE_SECONDS`) -- a later consumer only approves a UAC window that
+    is both recent AND absent from this snapshot.
+    """
+    tmp = state_file + f".tmp{os.getpid()}_{threading.get_ident()}"
     try:
-        with open(state_file, "w", encoding="utf-8") as f:
-            f.write(repr(time.time()))
+        preexisting = sorted(list_uac_hwnds())
+        # Write to a temp file in the same directory and atomically replace
+        # the real path, rather than truncating it in place -- a concurrent
+        # reader (the background watcher and an inline invocation can share
+        # the same --license-state-file) must never be able to observe a
+        # half-written/truncated file mid-write.
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"ts": time.time(), "preexisting_uac_hwnds": preexisting}, f)
+        # On Windows, os.replace() can fail with a transient sharing
+        # violation (WinError 32) if another cooperating process/thread has
+        # the destination open for reading at that exact instant -- retry
+        # briefly rather than silently dropping this accept event (losing it
+        # would mean the real UAC prompt never gets approved -> spurious
+        # test failure, not just a theoretical correctness gap).
+        last_err = None
+        for attempt in range(5):
+            try:
+                os.replace(tmp, state_file)
+                last_err = None
+                break
+            except OSError as e:
+                last_err = e
+                time.sleep(0.05 * (attempt + 1))
+        if last_err is not None:
+            raise last_err
     except Exception:
         pass
+    finally:
+        # Never leave a stray .tmp<pid>_<tid> file behind, whether the
+        # replace ultimately succeeded (nothing left to remove) or failed
+        # after retries (clean up so these don't silently accumulate in a
+        # long-lived screenshot_dir across many poll cycles).
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:
+            pass
 
 
-def _license_recently_accepted(state_file, grace_seconds):
+def _read_license_accept_state(state_file):
     try:
         with open(state_file, "r", encoding="utf-8") as f:
-            ts = float(f.read().strip())
+            data = json.load(f)
+        if isinstance(data, dict) and isinstance(data.get("ts"), (int, float)):
+            return data
     except Exception:
+        pass
+    return None
+
+
+def _uac_approval_allowed(state_file, hwnd, grace_seconds):
+    """True iff `hwnd` may be approved: a License was accepted within
+    `grace_seconds`, AND this specific window did not already exist at the
+    moment of that accept (see `_mark_license_accepted`).
+    """
+    try:
+        data = _read_license_accept_state(state_file)
+        if not data:
+            return False
+        if (time.time() - data["ts"]) >= grace_seconds:
+            return False
+        if hwnd is None:
+            # Couldn't resolve a handle to check against the snapshot -- fail
+            # closed rather than risk approving something we can't verify.
+            return False
+        return hwnd not in set(data.get("preexisting_uac_hwnds") or ())
+    except Exception:
+        # Any unexpected shape/type in the state data (e.g. a corrupted or
+        # partially-written file that slipped past _read_license_accept_state's
+        # own validation) must never translate into an approval -- fail closed.
         return False
-    return (time.time() - ts) < grace_seconds
 
 
 def try_click(win, names):
@@ -234,9 +323,10 @@ def handle_dialogs_once(license_state_file=None, ignore_hwnds=None):
                         # Present before this run could have triggered the SDK
                         # flow (or already handled this cycle) -- never ours.
                         continue
-                    if not _license_recently_accepted(state_file, UAC_GRACE_SECONDS):
-                        # No recent Android SDK License Accept -> not our flow;
-                        # leave this UAC prompt alone (see UAC_GRACE_SECONDS).
+                    if not _uac_approval_allowed(state_file, hwnd, UAC_GRACE_SECONDS):
+                        # No recent Android SDK License Accept tied to THIS
+                        # specific window -> not our flow; leave this UAC
+                        # prompt alone (see UAC_GRACE_SECONDS / _mark_license_accepted).
                         continue
                     clicked = try_click(w, ("Yes",))
                     if clicked:
@@ -259,13 +349,15 @@ def main():
                         "by this many ms (default 15 min) so the SDK download can "
                         "finish before we return.")
     p.add_argument("--license-state-file", dest="license_state_file", default=None,
-                   help="Path used to remember the last Android SDK License Accept "
-                        "timestamp, so a UAC prompt is only auto-approved shortly "
-                        "after that (see UAC_GRACE_SECONDS). Defaults to a shared "
-                        "per-devbox file under %%LOCALAPPDATA%%; pass this explicitly "
-                        "to share state with another cooperating process (e.g. "
-                        "sdk_dialog_watcher.py) that isn't using the default -- CSV "
-                        "callers should pass a path under {artifacts.screenshot_dir} "
+                   help="Path used to remember the moment of the last Android SDK "
+                        "License Accept, plus a snapshot of UAC windows already open "
+                        "at that moment, so a LATER UAC prompt is only auto-approved "
+                        "if it's both recent and newly-appeared since then (see "
+                        "UAC_GRACE_SECONDS / _mark_license_accepted). Defaults to a "
+                        "shared per-devbox file under %%LOCALAPPDATA%%; pass this "
+                        "explicitly to share state with another cooperating process "
+                        "(e.g. sdk_dialog_watcher.py) that isn't using the default -- "
+                        "CSV callers should pass a path under {artifacts.screenshot_dir} "
                         "so stale state from a previous/crashed run can never leak "
                         "into a new one (a fresh run always gets a fresh directory).")
     p.add_argument("--ignore-preexisting-uac", dest="ignore_preexisting_uac",
