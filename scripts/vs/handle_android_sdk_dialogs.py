@@ -62,10 +62,23 @@ WARNING_PHRASE = "missing android sdks required for building"
 # the next inline check or the continuous background watcher (each its own
 # process). A plain in-memory flag would not be visible across that process
 # boundary, so the "last license accept" timestamp is persisted to a small
-# state file instead -- by default a single well-known path under
-# %LOCALAPPDATA%, mirroring run_test.py's own single-active-run marker
-# convention (this repo already assumes only one UI-automation run is active
-# on a devbox at a time).
+# state file instead. CALLERS SHOULD PASS `--license-state-file` POINTING AT
+# A PATH UNDER THAT RUN'S OWN `{artifacts.screenshot_dir}` (every test case
+# gets its own, uniquely-timestamped one) rather than relying on the default
+# below -- a run-scoped path means a crashed/killed previous run can never
+# leave behind a stale "license accepted" timestamp that a later, unrelated
+# run picks up and treats as its own. The default (a single well-known path
+# under %LOCALAPPDATA%, mirroring run_test.py's own single-active-run marker
+# convention) only exists for ad hoc/manual invocations that don't have a
+# screenshot_dir to put it under.
+#
+# Even with run-scoping, a grace-period match alone can't rule out a UAC
+# prompt that was ALREADY open (for something unrelated, e.g. Windows Update)
+# at the moment a License was accepted -- it would still fall inside the
+# window. `--ignore-preexisting-uac` (used by sdk_dialog_watcher.py, see
+# `list_uac_hwnds()`) closes that gap: anything already on-screen before this
+# invocation started polling can't possibly be a prompt OUR SDK flow is about
+# to trigger, so it's excluded regardless of timing.
 UAC_GRACE_SECONDS = 60
 
 
@@ -167,8 +180,38 @@ def try_double_click_warning(vs_hwnd):
     return False
 
 
-def handle_dialogs_once(license_state_file=None):
+def _is_uac_window(title):
+    title = (title or "").strip()
+    return title == "User Account Control" or "Do you want to allow" in title
+
+
+def list_uac_hwnds():
+    """Snapshot the handles of every currently-open UAC-titled window.
+
+    Used by long-running callers (sdk_dialog_watcher.py) to record a
+    baseline of UAC prompts that already existed *before* this run could
+    possibly have triggered the Android SDK install flow. Those pre-
+    existing prompts are never ours to approve -- see `ignore_hwnds` on
+    `handle_dialogs_once` -- no matter how soon a License Accept happens
+    to follow.
+    """
+    hwnds = set()
+    for backend in ("uia", "win32"):
+        try:
+            for w in Desktop(backend=backend).windows():
+                try:
+                    if _is_uac_window(w.window_text()):
+                        hwnds.add(w.handle)
+                except Exception:
+                    continue
+        except Exception:
+            continue
+    return hwnds
+
+
+def handle_dialogs_once(license_state_file=None, ignore_hwnds=None):
     state_file = license_state_file or _default_license_state_file()
+    ignore_hwnds = ignore_hwnds or ()
     handled = []
     for backend in ("uia", "win32"):
         try:
@@ -182,7 +225,15 @@ def handle_dialogs_once(license_state_file=None):
                     if clicked:
                         handled.append(f"license {title!r} -> {clicked}")
                         _mark_license_accepted(state_file)
-                elif title.strip() == "User Account Control" or "Do you want to allow" in title:
+                elif _is_uac_window(title):
+                    try:
+                        hwnd = w.handle
+                    except Exception:
+                        hwnd = None
+                    if hwnd is not None and hwnd in ignore_hwnds:
+                        # Present before this run could have triggered the SDK
+                        # flow (or already handled this cycle) -- never ours.
+                        continue
                     if not _license_recently_accepted(state_file, UAC_GRACE_SECONDS):
                         # No recent Android SDK License Accept -> not our flow;
                         # leave this UAC prompt alone (see UAC_GRACE_SECONDS).
@@ -213,13 +264,23 @@ def main():
                         "after that (see UAC_GRACE_SECONDS). Defaults to a shared "
                         "per-devbox file under %%LOCALAPPDATA%%; pass this explicitly "
                         "to share state with another cooperating process (e.g. "
-                        "sdk_dialog_watcher.py) that isn't using the default.")
+                        "sdk_dialog_watcher.py) that isn't using the default -- CSV "
+                        "callers should pass a path under {artifacts.screenshot_dir} "
+                        "so stale state from a previous/crashed run can never leak "
+                        "into a new one (a fresh run always gets a fresh directory).")
+    p.add_argument("--ignore-preexisting-uac", dest="ignore_preexisting_uac",
+                   action="store_true",
+                   help="Snapshot every UAC-titled window already open before polling "
+                        "starts, and never approve one of those -- a prompt that "
+                        "predates this invocation cannot belong to an SDK flow it "
+                        "triggers. Recommended for any long-running/continuous caller.")
     a = p.parse_args()
 
     start = time.time()
     deadline = start + a.timeout_ms / 1000.0
     warning_clicked_once = False
     events = []
+    baseline_uac_hwnds = list_uac_hwnds() if a.ignore_preexisting_uac else ()
 
     while time.time() < deadline:
         cycle_hits = []
@@ -231,7 +292,7 @@ def main():
                 cycle_hits.append("warning double-clicked")
 
         # 2) License Agreement + UAC dialogs
-        cycle_hits.extend(handle_dialogs_once(a.license_state_file))
+        cycle_hits.extend(handle_dialogs_once(a.license_state_file, baseline_uac_hwnds))
 
         if cycle_hits:
             events.extend(cycle_hits)

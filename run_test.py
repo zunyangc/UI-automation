@@ -499,6 +499,43 @@ def run_global_cleanup(since):
         print(f"    ! clean up failed: {e}")
 
 
+def stop_background_watchers(ctx):
+    """Best-effort: stop any sdk_dialog_watcher.py instance this run started.
+
+    Generic and spec-agnostic -- it does not need to know whether this
+    particular spec even uses the watcher. It just looks for that script's
+    own "<stop-flag>.active" marker convention anywhere under this run's
+    `ctx.shot_dir` (the watcher writes one there, under whatever stop-flag
+    path the CSV chose, right after successfully launching) and calls
+    `stop` on each one found. This is what lets a detached watcher exit
+    within moments of ANY run outcome -- pass, fail, or an unexpected
+    runner crash -- instead of only on the spec's own final `stop` step
+    (which a failed/crashed run never reaches). See sdk_dialog_watcher.py's
+    module docstring for the full rationale.
+
+    Never raises: a problem here must not mask the spec's real result.
+    """
+    try:
+        if not os.path.isdir(ctx.shot_dir):
+            return
+        for name in os.listdir(ctx.shot_dir):
+            if not name.endswith(".active"):
+                continue
+            stop_flag = os.path.join(ctx.shot_dir, name[: -len(".active")])
+            script = script_path("scripts/vs/sdk_dialog_watcher.py")
+            if not os.path.isfile(script):
+                continue
+            try:
+                subprocess.run([PY, script, "stop", "--stop-flag", stop_flag,
+                                 "--wait-ms", "3000"],
+                               capture_output=True, text=True,
+                               encoding="utf-8", errors="replace")
+            except Exception as e:
+                print(f"    ! could not stop background watcher ({stop_flag}): {e}")
+    except Exception as e:
+        print(f"    ! stop_background_watchers failed (ignored): {e}")
+
+
 def main():
     global QUIET
     ap = argparse.ArgumentParser(description=__doc__)
@@ -515,6 +552,7 @@ def main():
     if not a.no_cleanup:
         cleanup_since = claim_active_run_marker(run_started_at)
     failed = False
+    ctx = None
     try:
         # Spec loading and Ctx construction (which creates the screenshot
         # dir) are inside this try so a bad/malformed CSV or a screenshot-
@@ -552,6 +590,8 @@ def main():
     finally:
         # Always runs -- pass, fail, or an unexpected runner exception --
         # so a test case never leaves the machine dirty for the next run.
+        if ctx is not None:
+            stop_background_watchers(ctx)
         if not a.no_cleanup:
             run_global_cleanup(cleanup_since)
             # Cleanup actually executed: this run has no more unfinished
