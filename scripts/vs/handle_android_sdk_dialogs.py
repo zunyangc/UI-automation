@@ -28,7 +28,7 @@ license Accept clicked, UAC Yes clicked), the poll deadline is extended by
 ``--post-work-ms`` to give the SDK download time to finish before we
 return. Otherwise the initial ``--timeout-ms`` is used unchanged.
 """
-import argparse, sys, time
+import argparse, os, sys, time
 
 try:
     from pywinauto import Desktop, Application
@@ -43,6 +43,57 @@ except Exception:
 
 
 WARNING_PHRASE = "missing android sdks required for building"
+
+# Gate UAC "Yes" clicks on a License Accept having just happened: VS always
+# shows "Android SDK - License Agreement" -> Accept immediately before the
+# matching UAC elevation prompt for that same SDK-install flow. Without this
+# gate, a bare "User Account Control" / "Do you want to allow" window match is
+# far too broad to leave running continuously for an entire test case (see
+# sdk_dialog_watcher.py) -- it would happily approve an unrelated elevation
+# prompt (Windows Update, another app, etc.) that happens to appear while the
+# watcher is polling. `UAC_GRACE_SECONDS` is generous (the License->UAC
+# transition is normally near-instant) without being so long it could still
+# match a later, unrelated prompt.
+#
+# The "License was just accepted" fact has to survive across SEPARATE process
+# invocations -- e.g. the License dialog can be accepted by the inline check
+# at project-creation time (one `handle_android_sdk_dialogs.py` process) while
+# the matching UAC prompt only appears a little later, polled for by either
+# the next inline check or the continuous background watcher (each its own
+# process). A plain in-memory flag would not be visible across that process
+# boundary, so the "last license accept" timestamp is persisted to a small
+# state file instead -- by default a single well-known path under
+# %LOCALAPPDATA%, mirroring run_test.py's own single-active-run marker
+# convention (this repo already assumes only one UI-automation run is active
+# on a devbox at a time).
+UAC_GRACE_SECONDS = 60
+
+
+def _default_license_state_file():
+    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    d = os.path.join(base, "ui-automation")
+    try:
+        os.makedirs(d, exist_ok=True)
+    except Exception:
+        pass
+    return os.path.join(d, "android_sdk_license_grace.flag")
+
+
+def _mark_license_accepted(state_file):
+    try:
+        with open(state_file, "w", encoding="utf-8") as f:
+            f.write(repr(time.time()))
+    except Exception:
+        pass
+
+
+def _license_recently_accepted(state_file, grace_seconds):
+    try:
+        with open(state_file, "r", encoding="utf-8") as f:
+            ts = float(f.read().strip())
+    except Exception:
+        return False
+    return (time.time() - ts) < grace_seconds
 
 
 def try_click(win, names):
@@ -116,7 +167,8 @@ def try_double_click_warning(vs_hwnd):
     return False
 
 
-def handle_dialogs_once():
+def handle_dialogs_once(license_state_file=None):
+    state_file = license_state_file or _default_license_state_file()
     handled = []
     for backend in ("uia", "win32"):
         try:
@@ -129,7 +181,12 @@ def handle_dialogs_once():
                     clicked = try_click(w, ("Accept", "I Accept", "Yes"))
                     if clicked:
                         handled.append(f"license {title!r} -> {clicked}")
+                        _mark_license_accepted(state_file)
                 elif title.strip() == "User Account Control" or "Do you want to allow" in title:
+                    if not _license_recently_accepted(state_file, UAC_GRACE_SECONDS):
+                        # No recent Android SDK License Accept -> not our flow;
+                        # leave this UAC prompt alone (see UAC_GRACE_SECONDS).
+                        continue
                     clicked = try_click(w, ("Yes",))
                     if clicked:
                         handled.append(f"UAC {title!r} -> {clicked}")
@@ -150,6 +207,13 @@ def main():
                    help="If SDK-install activity is detected, extend the poll deadline "
                         "by this many ms (default 15 min) so the SDK download can "
                         "finish before we return.")
+    p.add_argument("--license-state-file", dest="license_state_file", default=None,
+                   help="Path used to remember the last Android SDK License Accept "
+                        "timestamp, so a UAC prompt is only auto-approved shortly "
+                        "after that (see UAC_GRACE_SECONDS). Defaults to a shared "
+                        "per-devbox file under %%LOCALAPPDATA%%; pass this explicitly "
+                        "to share state with another cooperating process (e.g. "
+                        "sdk_dialog_watcher.py) that isn't using the default.")
     a = p.parse_args()
 
     start = time.time()
@@ -167,7 +231,7 @@ def main():
                 cycle_hits.append("warning double-clicked")
 
         # 2) License Agreement + UAC dialogs
-        cycle_hits.extend(handle_dialogs_once())
+        cycle_hits.extend(handle_dialogs_once(a.license_state_file))
 
         if cycle_hits:
             events.extend(cycle_hits)

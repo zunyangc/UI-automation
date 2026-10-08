@@ -9,6 +9,7 @@ Categories:
 - [`scripts/window/`](#window--window-management) — find, focus, maximize, launch, close windows
 - [`scripts/uia/`](#uia--ui-automation-inspection) — read / inspect UI Automation trees and text
 - [`scripts/files/`](#files--files--clipboard) — screenshots, file writes/asserts, clipboard, home dir
+- [`scripts/vs/`](#vs--visual-studio-automation-helpers) — Visual Studio-specific dialog/menu helpers
 - [`scripts/csvfmt/`](#csvfmt--csv-spec-loader) — in-memory CSV-spec loader/schema (internal, not step types)
 
 ---
@@ -286,6 +287,35 @@ Resolves `~` to the real profile path on this machine (any drive) and prints it 
 
 ```
 print_home.py
+```
+
+---
+
+## `vs/` — Visual Studio automation helpers
+
+Helpers specific to driving Visual Studio dialogs/menus that don't fit the generic `window/`/`uia/` categories.
+
+### `handle_android_sdk_dialogs.py` — drive the Android SDK install flow
+Opportunistically dismisses the two dialogs VS pops during the MAUI "missing Android SDKs" install flow: `Android SDK - License Agreement` (click `Accept`) and the matching `User Account Control` elevation prompt (click `Yes`). Polls for `--timeout-ms`; if `--vs-hwnd` is given it also scans the Error List for the `missing Android SDKs required for building` warning row and double-clicks it once to kick off the flow. Any SDK-install activity detected extends the deadline by `--post-work-ms` so the download/install has time to finish. The UAC click is gated on a License Accept having just happened (within `UAC_GRACE_SECONDS`, tracked via a small state file so the gate survives across separate invocations of this script, or a cooperating `sdk_dialog_watcher.py` instance using the same `--license-state-file`) -- this keeps it from ever approving an unrelated elevation prompt. Always exits 0 (opportunistic safety net).
+
+```
+handle_android_sdk_dialogs.py [--vs-hwnd HWND] [--timeout-ms 3000] [--poll-ms 500]
+                               [--post-work-ms 900000] [--license-state-file PATH]
+```
+
+### `select_debug_target.py` — pick the Windows debug target
+Opens the `Debug Target` SplitButton on the VS toolbar, asserts the default target's legacy Help field contains `Windows Machine`, expands the drop-down, finds the `Framework (netX.Y-windowsX.Y.Z)` entry matching `--net-version`, clicks it, and prints the extracted Windows TFM on stdout (`$.cols[0]`).
+
+```
+select_debug_target.py <vs_hwnd> --net-version ".NET 10.0" [--timeout-ms 20000] [--expected-target "Windows Machine"]
+```
+
+### `sdk_dialog_watcher.py` — background Android SDK/UAC dialog watcher
+`start`/`stop` pair for scenarios where the License/UAC dialogs above can appear at any point across many steps, not just at one or two fixed polling points. `start` launches a detached background process that repeatedly calls `handle_android_sdk_dialogs.py`'s own dialog-handling logic every `--poll-ms` until `stop` writes its `--stop-flag` file (or `--max-lifetime-ms` elapses, a safety net for a crashed/killed test case that never reaches its `stop` step). Always exits 0; never touches any window other than the two known dialogs.
+
+```
+sdk_dialog_watcher.py start --stop-flag PATH [--log-file PATH] [--poll-ms 1000] [--max-lifetime-ms 7200000]
+sdk_dialog_watcher.py stop  --stop-flag PATH [--wait-ms 5000]
 ```
 
 ---

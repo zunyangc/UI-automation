@@ -31,7 +31,7 @@ do not want a second, duplicate "unknown dialog -> fail" path here.
 raises past its own top-level guard (it must never crash VS/test automation
 just because a transient UIA lookup failed). As a safety net against a
 crashed/killed test case that never reaches its own `stop` call, the loop
-self-terminates after `--max-lifetime-ms` (default 20 minutes) even if the
+self-terminates after `--max-lifetime-ms` (default 2 hours) even if the
 stop-flag file never appears.
 """
 import argparse, os, subprocess, sys, time
@@ -154,8 +154,12 @@ def main():
                          help="path to a file; its existence tells the loop to exit")
     p_start.add_argument("--poll-ms", dest="poll_ms", type=int, default=1000)
     p_start.add_argument("--max-lifetime-ms", dest="max_lifetime_ms", type=int,
-                         default=20 * 60 * 1000,
-                         help="safety cap so the loop can't outlive a crashed test (default 20 min)")
+                         default=2 * 60 * 60 * 1000,
+                         help="safety cap so the loop can't outlive a crashed test (default 2h). "
+                              "Callers whose scenario can legitimately run longer than that "
+                              "(e.g. a multi-iteration loop with long build timeouts) should pass "
+                              "an explicit, larger value here -- this is a crash safety net, not "
+                              "meant to be hit during a normal run.")
     p_start.add_argument("--log-file", dest="log_file", default=None)
 
     p_stop = sub.add_parser("stop", help="signal the background watcher to exit")
@@ -165,7 +169,7 @@ def main():
     p_loop = sub.add_parser("_loop", help=argparse.SUPPRESS)  # internal use only
     p_loop.add_argument("--stop-flag", dest="stop_flag", required=True)
     p_loop.add_argument("--poll-ms", dest="poll_ms", type=int, default=1000)
-    p_loop.add_argument("--max-lifetime-ms", dest="max_lifetime_ms", type=int, default=20 * 60 * 1000)
+    p_loop.add_argument("--max-lifetime-ms", dest="max_lifetime_ms", type=int, default=2 * 60 * 60 * 1000)
     p_loop.add_argument("--log-file", dest="log_file", default=None)
 
     a = p.parse_args()
