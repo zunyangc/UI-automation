@@ -5,7 +5,7 @@ The Debug Target control is exposed to UIA as a ``SplitButton`` whose accessibil
 Once the drop-down is expanded, its items appear on a top-level popup and expose ``MenuItem`` nodes named like ``Framework (net10.0-windows10.0.19041.0)``. WPF does not expose per-item selection state through UIA for these items, so we verify "default is a Windows target" from the SplitButton's Help field before we open the drop-down, then read the drop-down purely to extract the exact TFM string.
 
 Workflow:
-  1. Find the ``Debug Target`` SplitButton and read its legacy Help field. Assert Help contains ``Windows Machine`` (the spec requirement: default target is the netX.Y-windows one).
+  1. Find the ``Debug Target`` SplitButton and read its legacy Help field. If it already contains ``Windows Machine``, continue. If it contains ``Android Emulator`` instead, open the drop-down and click the ``Windows Machine`` entry first, then re-open the drop-down for the Framework entry below. Any other default target fails.
   2. Click ~8px inside the SplitButton's right edge to expand the drop-down.
   3. Scan the desktop for a ``MenuItem`` whose name matches ``^Framework \(net<major>\.<minor>-windows[\d.]+\)$``.
   4. Extract the Windows TFM from the parentheses (e.g. ``net10.0-windows10.0.19041.0``).
@@ -67,6 +67,38 @@ def scan_menu(prefix_re, timeout_ms):
     return None, None
 
 
+def click_chevron(split, win):
+    """Click the drop-down chevron on the right edge of the SplitButton."""
+    r = split.rectangle()
+    click_x = r.right - 8
+    click_y = (r.top + r.bottom) // 2
+    try:
+        win.set_focus()
+    except Exception:
+        pass
+    mouse_click(coords=(click_x, click_y))
+
+
+def switch_target(split, win, target_name, timeout_ms):
+    """Open the drop-down and click the MenuItem exactly named ``target_name``."""
+    click_chevron(split, win)
+    time.sleep(0.6)
+    name_re = re.compile(r"^" + re.escape(target_name) + r"$")
+    elem, _ = scan_menu(name_re, timeout_ms)
+    if elem is None:
+        try:
+            send_keys("{ESC}")
+        except Exception:
+            pass
+        return False
+    try:
+        elem.invoke()
+    except Exception:
+        elem.click_input()
+    time.sleep(0.6)
+    return True
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -105,24 +137,22 @@ def main():
         sys.exit(2)
     default_target = (legacy.get("Help") or "").strip()
     if a.expected_target not in default_target:
-        print(f"ERROR: default debug target Help={default_target!r} does not contain "
-              f"{a.expected_target!r}; the Windows target is not the default",
-              file=sys.stderr)
-        sys.exit(1)
-
-    r = split.rectangle()
-    click_x = r.right - 8
-    click_y = (r.top + r.bottom) // 2
+        if "Android Emulator" in default_target:
+            print(f"default debug target is {default_target!r}; switching to {a.expected_target!r}",
+                  file=sys.stderr)
+            if not switch_target(split, win, a.expected_target, a.timeout_ms):
+                print(f"ERROR: could not find {a.expected_target!r} in the Debug Target drop-down",
+                      file=sys.stderr); sys.exit(1)
+        else:
+            print(f"ERROR: default debug target Help={default_target!r} does not contain "
+                  f"{a.expected_target!r}; the Windows target is not the default",
+                  file=sys.stderr)
+            sys.exit(1)
 
     try:
-        win.set_focus()
-    except Exception:
-        pass
-    try:
-        mouse_click(coords=(click_x, click_y))
+        click_chevron(split, win)
     except Exception as e:
-        print(f"ERROR: failed to click drop-down chevron at ({click_x},{click_y}): {e}",
-              file=sys.stderr); sys.exit(2)
+        print(f"ERROR: failed to click drop-down chevron: {e}", file=sys.stderr); sys.exit(2)
     time.sleep(0.6)
 
     elem, name = scan_menu(entry_re, a.timeout_ms)
